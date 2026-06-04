@@ -193,6 +193,32 @@ const ConfirmModal = ({ message, onConfirm, onCancel }) => (
 
 // ─── FORMAT CURRENCY ──────────────────────────────────────────────────────────
 const fmt = (v) => new Intl.NumberFormat("pt-BR", { style: "currency", currency: "BRL" }).format(v || 0);
+const fileToDataUrl = (file) => new Promise((resolve, reject) => {
+  if (!file) return resolve({ data_url: '', mime: '', nome: '' });
+  const reader = new FileReader();
+  reader.onload = () => resolve({ data_url: reader.result, mime: file.type || 'application/octet-stream', nome: file.name });
+  reader.onerror = reject;
+  reader.readAsDataURL(file);
+});
+
+const downloadArquivo = (arquivo, pagamento) => {
+  const nome = arquivo?.nome_arquivo || pagamento?.anexo_nome || pagamento?.numero_nfe || 'arquivo';
+  const dataUrl = arquivo?.data_url || pagamento?.anexo_data;
+  const mime = arquivo?.mime || pagamento?.anexo_mime || 'text/plain;charset=utf-8';
+  let href = dataUrl;
+  if (!href) {
+    const texto = `Arquivo registrado no sistema Gigantão\nNome: ${nome}\nNF-e: ${pagamento?.numero_nfe || '-'}\nValor: ${pagamento?.valor ? fmt(pagamento.valor) : '-'}\nObservação: ${pagamento?.observacao || '-'}`;
+    href = URL.createObjectURL(new Blob([texto], { type: mime }));
+  }
+  const a = document.createElement('a');
+  a.href = href;
+  a.download = nome;
+  document.body.appendChild(a);
+  a.click();
+  a.remove();
+  if (!dataUrl) setTimeout(() => URL.revokeObjectURL(href), 1000);
+};
+
 const fmtDate = (d) => d ? new Date(d + "T00:00:00").toLocaleDateString("pt-BR") : "-";
 
 // ─── METRIC CARD ──────────────────────────────────────────────────────────────
@@ -690,12 +716,13 @@ const PaymentsScreen = ({ data, setData, currentUser, addLog }) => {
   const [payModal, setPayModal] = useState(false);
   const [payForm, setPayForm] = useState({ data_pagamento: new Date().toISOString().slice(0, 10), forma_pagamento: "PIX", tipo_anexo: "Comprovante" });
 
-  const enviarPagamentoFornecedor = () => {
+  const enviarPagamentoFornecedor = async () => {
     if (!payForm.valor) return alert("Informe o valor do pagamento.");
     if (!payForm.anexo_file && !payForm.anexo_nome) return alert("Anexe o comprovante ou a nota de bonificação.");
     const next = { ...data, pagamentos: [...data.pagamentos], anexos: [...(data.anexos || [])] };
     const id = next.nextId.pagamentos++;
     const anexoNome = payForm.anexo_file?.name || payForm.anexo_nome || "";
+    const arquivoData = await fileToDataUrl(payForm.anexo_file);
     const novo = {
       id,
       fornecedor_id: currentUser.fornecedor_id,
@@ -706,13 +733,15 @@ const PaymentsScreen = ({ data, setData, currentUser, addLog }) => {
       data_pagamento: payForm.data_pagamento || new Date().toISOString().slice(0, 10),
       anexo_nome: anexoNome,
       tipo_anexo: payForm.tipo_anexo || (payForm.forma_pagamento === "Bonificação" ? "Nota de bonificação" : "Comprovante"),
+      anexo_data: arquivoData.data_url,
+      anexo_mime: arquivoData.mime,
       enviado_por: "Fornecedor",
       confirmado: false,
       status_confirmacao: "Aguardando confirmação",
       created_at: new Date().toISOString()
     };
     next.pagamentos.push(novo);
-    next.anexos.push({ id: next.nextId.anexos++, pagamento_id: id, nome_arquivo: anexoNome, tipo_arquivo: novo.tipo_anexo, created_at: new Date().toISOString() });
+    next.anexos.push({ id: next.nextId.anexos++, pagamento_id: id, nome_arquivo: anexoNome, tipo_arquivo: novo.tipo_anexo, data_url: arquivoData.data_url, mime: arquivoData.mime, created_at: new Date().toISOString() });
     next.logs = [...(next.logs || []), { id: next.nextId.logs++, usuario_id: currentUser.id, acao: "Envio", descricao: "Fornecedor enviou comprovante/nota para confirmação", ip: "127.0.0.1", created_at: new Date().toISOString() }];
     setData(next);
     setPayModal(false);
@@ -749,12 +778,13 @@ const PaymentsScreen = ({ data, setData, currentUser, addLog }) => {
     }
   };
 
-  const savePayment = () => {
+  const savePayment = async () => {
     if (!form.fornecedor_id || !form.valor) return alert("Fornecedor e valor são obrigatórios.");
     const next = { ...data, pagamentos: [...data.pagamentos], fornecedores: data.fornecedores.map(f => ({ ...f })), anexos: [...(data.anexos || [])] };
     const id = next.nextId.pagamentos++;
     const valor = Number(form.valor);
     const anexoNome = form.anexo_file?.name || form.anexo_nome || "";
+    const arquivoData = await fileToDataUrl(form.anexo_file);
     const novo = {
       ...form,
       id,
@@ -762,6 +792,8 @@ const PaymentsScreen = ({ data, setData, currentUser, addLog }) => {
       valor,
       anexo_nome: anexoNome,
       tipo_anexo: form.tipo_anexo || (form.forma_pagamento === "Bonificação" ? "Nota de bonificação" : "Comprovante"),
+      anexo_data: arquivoData.data_url,
+      anexo_mime: arquivoData.mime,
       enviado_por: currentUser.tipo,
       confirmado: true,
       status_confirmacao: "Confirmado",
@@ -772,7 +804,7 @@ const PaymentsScreen = ({ data, setData, currentUser, addLog }) => {
     delete novo.anexo_file;
     next.pagamentos.push(novo);
     if (anexoNome) {
-      next.anexos.push({ id: next.nextId.anexos++, pagamento_id: id, nome_arquivo: anexoNome, tipo_arquivo: novo.tipo_anexo, created_at: new Date().toISOString() });
+      next.anexos.push({ id: next.nextId.anexos++, pagamento_id: id, nome_arquivo: anexoNome, tipo_arquivo: novo.tipo_anexo, data_url: arquivoData.data_url, mime: arquivoData.mime, created_at: new Date().toISOString() });
     }
     aplicarSaldo(next, novo);
     const fIdx = next.fornecedores.findIndex(f => f.id === Number(form.fornecedor_id));
@@ -850,6 +882,7 @@ const PaymentsScreen = ({ data, setData, currentUser, addLog }) => {
                       {currentUser.tipo === "Administrador" && st === "Aguardando confirmação" && (
                         <button style={{ ...S.btn("success", "sm"), padding: "4px 7px" }} onClick={() => confirmarPagamento(p.id)}>Confirmar</button>
                       )}
+                      {p.anexo_nome && <button style={{ ...S.btn("outline", "sm"), padding: "4px 7px" }} onClick={() => downloadArquivo(data.anexos.find(a => a.pagamento_id === p.id), p)} title="Baixar anexo"><Icon name="download" size={12} /></button>}
                       {canDelete && <button style={{ ...S.btn("danger", "sm"), padding: "4px 7px" }} onClick={() => setConfirm(p.id)}><Icon name="trash" size={12} color="#fff" /></button>}
                     </div>
                   </td>
@@ -899,6 +932,8 @@ const PaymentsScreen = ({ data, setData, currentUser, addLog }) => {
                 <option value="">Selecione...</option>
                 <option value="Comprovante">Comprovante</option>
                 <option value="Nota de bonificação">Nota de bonificação</option>
+                <option value="NF-e">NF-e</option>
+                <option value="JPG / Imagem">JPG / Imagem</option>
               </select>
             </div>
             <div style={S.formRow}>
@@ -1019,12 +1054,14 @@ const DocumentsScreen = ({ data, setData, currentUser, addLog }) => {
   const [confirm, setConfirm] = useState(null);
   const canDelete = currentUser.tipo === "Administrador";
 
-  const addAnexo = () => {
-    if (!form.pagamento_id || !form.nome_arquivo) return alert("Selecione o pagamento e informe o nome do arquivo.");
-    const next = { ...data };
+  const addAnexo = async () => {
+    if (!form.pagamento_id || (!form.nome_arquivo && !form.arquivo_file)) return alert("Selecione o pagamento e informe/anexe o arquivo.");
+    const arquivoData = await fileToDataUrl(form.arquivo_file);
+    const nomeArquivo = form.arquivo_file?.name || form.nome_arquivo;
+    const next = { ...data, anexos: [...(data.anexos || [])] };
     const id = next.nextId.anexos++;
-    next.anexos.push({ id, pagamento_id: Number(form.pagamento_id), nome_arquivo: form.nome_arquivo, tipo_arquivo: form.tipo || "PDF", created_at: new Date().toISOString().slice(0, 10) });
-    addLog(`Documento ${form.nome_arquivo} anexado`);
+    next.anexos.push({ id, pagamento_id: Number(form.pagamento_id), nome_arquivo: nomeArquivo, tipo_arquivo: form.tipo || arquivoData.mime || "Arquivo", data_url: arquivoData.data_url, mime: arquivoData.mime, created_at: new Date().toISOString().slice(0, 10) });
+    addLog(`Documento ${nomeArquivo} anexado`);
     setData(next);
     setModal(false);
     setForm({});
@@ -1072,7 +1109,7 @@ const DocumentsScreen = ({ data, setData, currentUser, addLog }) => {
                   <td style={S.td}>{fmtDate(a.created_at)}</td>
                   <td style={S.td}>
                     <div style={{ display: "flex", gap: 6 }}>
-                      <button style={{ ...S.btn("outline", "sm"), padding: "5px 8px" }} title="Download"><Icon name="download" size={13} /></button>
+                      <button style={{ ...S.btn("outline", "sm"), padding: "5px 8px" }} title="Baixar arquivo" onClick={() => downloadArquivo(a, pag)}><Icon name="download" size={13} /></button>
                       {canDelete && <button style={{ ...S.btn("danger", "sm"), padding: "5px 8px" }} onClick={() => setConfirm(a.id)}><Icon name="trash" size={13} color="#fff" /></button>}
                     </div>
                   </td>
@@ -1103,14 +1140,15 @@ const DocumentsScreen = ({ data, setData, currentUser, addLog }) => {
             <div style={S.formRow}>
               <label style={S.label}>Tipo</label>
               <select style={S.select} value={form.tipo || "PDF"} onChange={e => setForm(p => ({ ...p, tipo: e.target.value }))}>
-                {["PDF", "XML", "JPG", "PNG"].map(t => <option key={t} value={t}>{t}</option>)}
+                {["PDF", "NF-e", "XML", "JPG", "PNG", "Comprovante"].map(t => <option key={t} value={t}>{t}</option>)}
               </select>
             </div>
           </div>
           <div style={{ background: "#f8fafc", border: `2px dashed ${COLORS.border}`, borderRadius: 8, padding: "28px 20px", textAlign: "center", marginBottom: 14 }}>
             <Icon name="upload" size={24} color={COLORS.textMuted} />
-            <p style={{ margin: "8px 0 4px", fontSize: 13, fontWeight: 500 }}>Clique ou arraste o arquivo aqui</p>
-            <p style={{ margin: 0, fontSize: 12, color: COLORS.textMuted }}>PDF, XML, JPG, PNG — máx. 10MB</p>
+            <p style={{ margin: "8px 0 4px", fontSize: 13, fontWeight: 500 }}>Clique para importar PDF, XML/NF-e, JPG ou PNG</p>
+            <input style={{ ...S.input, marginTop: 10 }} type="file" accept=".pdf,.jpg,.jpeg,.png,.xml" onChange={e => setForm(p => ({ ...p, arquivo_file: e.target.files?.[0], nome_arquivo: e.target.files?.[0]?.name || p.nome_arquivo, tipo: (e.target.files?.[0]?.name || '').toLowerCase().endsWith('.xml') ? 'NF-e' : (e.target.files?.[0]?.type?.startsWith('image/') ? 'JPG' : p.tipo) }))} />
+            <p style={{ margin: "8px 0 0", fontSize: 12, color: COLORS.textMuted }}>PDF, XML/NF-e, JPG, PNG — máx. 10MB</p>
           </div>
           <div style={{ display: "flex", gap: 10, justifyContent: "flex-end" }}>
             <button style={S.btn("outline")} onClick={() => setModal(false)}>Cancelar</button>
@@ -1377,12 +1415,13 @@ const SupplierPortal = ({ data, setData, currentUser, onLogout }) => {
   const [payModal, setPayModal] = useState(false);
   const [payForm, setPayForm] = useState({ data_pagamento: new Date().toISOString().slice(0, 10), forma_pagamento: "PIX", tipo_anexo: "Comprovante" });
 
-  const enviarPagamentoFornecedor = () => {
+  const enviarPagamentoFornecedor = async () => {
     if (!payForm.valor) return alert("Informe o valor do pagamento.");
     if (!payForm.anexo_file && !payForm.anexo_nome) return alert("Anexe o comprovante ou a nota de bonificação.");
     const next = { ...data, pagamentos: [...(data.pagamentos || [])], anexos: [...(data.anexos || [])], logs: [...(data.logs || [])] };
     const id = next.nextId.pagamentos++;
     const anexoNome = payForm.anexo_file?.name || payForm.anexo_nome || "";
+    const arquivoData = await fileToDataUrl(payForm.anexo_file);
     const novo = {
       id,
       fornecedor_id: Number(currentUser.fornecedor_id),
@@ -1393,13 +1432,15 @@ const SupplierPortal = ({ data, setData, currentUser, onLogout }) => {
       data_pagamento: payForm.data_pagamento || new Date().toISOString().slice(0, 10),
       anexo_nome: anexoNome,
       tipo_anexo: payForm.tipo_anexo || (payForm.forma_pagamento === "Bonificação" ? "Nota de bonificação" : "Comprovante"),
+      anexo_data: arquivoData.data_url,
+      anexo_mime: arquivoData.mime,
       enviado_por: "Fornecedor",
       confirmado: false,
       status_confirmacao: "Aguardando confirmação",
       created_at: new Date().toISOString()
     };
     next.pagamentos.push(novo);
-    next.anexos.push({ id: next.nextId.anexos++, pagamento_id: id, nome_arquivo: anexoNome, tipo_arquivo: novo.tipo_anexo, created_at: new Date().toISOString() });
+    next.anexos.push({ id: next.nextId.anexos++, pagamento_id: id, nome_arquivo: anexoNome, tipo_arquivo: novo.tipo_anexo, data_url: arquivoData.data_url, mime: arquivoData.mime, created_at: new Date().toISOString() });
     next.logs.push({ id: next.nextId.logs++, usuario_id: currentUser.id, acao: "Envio", descricao: "Fornecedor enviou comprovante/nota para confirmação", ip: "127.0.0.1", created_at: new Date().toISOString() });
     setData(next);
     setPayModal(false);
@@ -1477,7 +1518,7 @@ const SupplierPortal = ({ data, setData, currentUser, onLogout }) => {
                         <td style={S.td}>{fmtDate(p.data_pagamento)}</td>
                         <td style={{ ...S.td, fontWeight: 700, color: p.forma_pagamento === "Bonificação" ? COLORS.warning : COLORS.success }}>{fmt(p.valor)}</td>
                         <td style={S.td}><StatusBadge status={p.forma_pagamento === "Bonificação" ? "Bonificado" : "Pago"} /></td>
-                        <td style={S.td}>{p.anexo_nome ? `📎 ${p.anexo_nome}` : "-"}</td>
+                        <td style={S.td}>{p.anexo_nome ? <button style={{ ...S.btn("outline", "sm") }} onClick={() => downloadArquivo(data.anexos.find(a => a.pagamento_id === p.id), p)}><Icon name="download" size={12} /> {p.anexo_nome}</button> : "-"}</td>
                         <td style={S.td}><StatusBadge status={p.status_confirmacao || (p.confirmado === false ? "Aguardando confirmação" : "Confirmado")} /></td>
                         <td style={{ ...S.td, fontFamily: "monospace", fontSize: 12 }}>{p.numero_nfe || "-"}</td>
                       </tr>
@@ -1508,7 +1549,7 @@ const SupplierPortal = ({ data, setData, currentUser, onLogout }) => {
                         <td style={S.td}>{fmtDate(p.data_pagamento)}</td>
                         <td style={{ ...S.td, fontWeight: 700, color: p.forma_pagamento === "Bonificação" ? COLORS.warning : COLORS.success }}>{fmt(p.valor)}</td>
                         <td style={S.td}><StatusBadge status={p.forma_pagamento === "Bonificação" ? "Bonificado" : "Pago"} /></td>
-                        <td style={S.td}>{p.anexo_nome ? `📎 ${p.anexo_nome}` : "-"}</td>
+                        <td style={S.td}>{p.anexo_nome ? <button style={{ ...S.btn("outline", "sm") }} onClick={() => downloadArquivo(data.anexos.find(a => a.pagamento_id === p.id), p)}><Icon name="download" size={12} /> {p.anexo_nome}</button> : "-"}</td>
                         <td style={S.td}><StatusBadge status={p.status_confirmacao || (p.confirmado === false ? "Aguardando confirmação" : "Confirmado")} /></td>
                         <td style={{ ...S.td, fontFamily: "monospace", fontSize: 12 }}>{p.numero_nfe || "-"}</td>
                         <td style={S.td}>{p.observacao || "-"}</td>
@@ -1543,7 +1584,7 @@ const SupplierPortal = ({ data, setData, currentUser, onLogout }) => {
                           <td style={S.td}><span style={S.badge("danger")}>{a.tipo_arquivo}</span></td>
                           <td style={{ ...S.td, fontFamily: "monospace", fontSize: 12 }}>{pag?.numero_nfe || "-"}</td>
                           <td style={S.td}>{fmtDate(a.created_at)}</td>
-                          <td style={S.td}><button style={{ ...S.btn("primary", "sm") }}><Icon name="download" size={12} color="#fff" /> Baixar</button></td>
+                          <td style={S.td}><button style={{ ...S.btn("primary", "sm") }} onClick={() => downloadArquivo(a, pag)}><Icon name="download" size={12} color="#fff" /> Baixar</button></td>
                         </tr>
                       );
                     })}
@@ -1582,6 +1623,8 @@ const SupplierPortal = ({ data, setData, currentUser, onLogout }) => {
                   <select style={S.select} value={payForm.tipo_anexo || ""} onChange={e => setPayForm(p => ({ ...p, tipo_anexo: e.target.value }))}>
                     <option value="Comprovante">Comprovante</option>
                     <option value="Nota de bonificação">Nota de bonificação</option>
+                    <option value="NF-e">NF-e</option>
+                    <option value="JPG / Imagem">JPG / Imagem</option>
                   </select>
                 </div>
                 <div style={S.formRow}>
