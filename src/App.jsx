@@ -667,7 +667,7 @@ const SuppliersScreen = ({ data, setData, currentUser, addLog }) => {
     f.cnpj?.includes(search)
   );
 
-  const openNew = () => { setForm({ estado: "SP" }); setModal("new"); };
+  const openNew = () => { setForm({ estado: "SP", ativo: true, status_cadastro: "Ativo" }); setModal("new"); };
   const openEdit = (f) => { setForm({ ...f }); setModal("edit"); };
   const openDetail = (f) => setDetail(f);
 
@@ -676,8 +676,8 @@ const SuppliersScreen = ({ data, setData, currentUser, addLog }) => {
     const next = { ...data };
     if (modal === "new") {
       const id = next.nextId.fornecedores++;
-      next.fornecedores.push({ ...form, id, ativo: false, status_cadastro: "Em análise", saldo_devido: 0, saldo_pago: 0, saldo_bonificado: 0, created_at: new Date().toISOString().slice(0, 10) });
-      addLog(`Fornecedor ${form.razao_social} cadastrado`);
+      next.fornecedores.push({ ...form, id, ativo: true, status_cadastro: "Ativo", saldo_devido: 0, saldo_pago: 0, saldo_bonificado: 0, created_at: new Date().toISOString().slice(0, 10) });
+      addLog(`Fornecedor ${form.razao_social} cadastrado como ativo`);
     } else {
       next.fornecedores = next.fornecedores.map(f => f.id === form.id ? { ...f, ...form } : f);
       addLog(`Fornecedor ${form.razao_social} atualizado`);
