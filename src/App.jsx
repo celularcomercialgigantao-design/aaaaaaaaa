@@ -248,7 +248,7 @@ const SimpleChart = ({ type, data, labels, color = COLORS.primary, height = 200 
 // ═══════════════════════════════════════════════════════════════════════════════
 
 // ─── LOGIN SCREEN ─────────────────────────────────────────────────────────────
-const LoginScreen = ({ onLogin, portalMode, data, setData }) => {
+const LoginScreen = ({ onLogin, portalMode, data, setData, onBackHome }) => {
   const [modo, setModo] = useState("login");
   const [email, setEmail] = useState("");
   const [senha, setSenha] = useState("");
@@ -281,6 +281,7 @@ const LoginScreen = ({ onLogin, portalMode, data, setData }) => {
       if (!user.ativo) { setError("Usuário inativo. Contate o administrador."); setLoading(false); return; }
       if (portalMode && user.tipo !== "Fornecedor") { setError("Acesso restrito ao portal de fornecedores."); setLoading(false); return; }
       if (!portalMode && user.tipo === "Fornecedor") { setError("Use o portal do fornecedor para acessar."); setLoading(false); return; }
+      if (setData) setData(base);
       setLoading(false);
       onLogin(user);
     }, 600);
@@ -387,7 +388,7 @@ const LoginScreen = ({ onLogin, portalMode, data, setData }) => {
           </div>
           <img src="/logo-gigantao.png" alt="Gigantão" style={{maxWidth:"220px",marginBottom:"12px"}} />
           <h2 style={{ margin: 0, fontSize: 20, fontWeight: 700 }}>
-            {portalMode ? "PORTAL DO FORNECEDOR" : "Sistema de Gestão"}
+            {portalMode ? "Portal do Fornecedor" : "Sistema de Gestão"}
           </h2>
           <p style={{ margin: "6px 0 0", color: COLORS.textMuted, fontSize: 13 }}>
             {modo === "cadastro" ? "Criar novo cadastro" : portalMode ? "Acesse suas informações financeiras" : "Gestão financeira de fornecedores"}
@@ -414,6 +415,11 @@ const LoginScreen = ({ onLogin, portalMode, data, setData }) => {
                 Cadastrar
               </button>
             </div>
+            {portalMode && onBackHome && (
+              <button style={{ ...S.btn("ghost"), width: "100%", justifyContent: "center", padding: "11px", marginTop: 8 }} onClick={onBackHome}>
+                <Icon name="arrow_left" size={14} /> Voltar para login administrativo
+              </button>
+            )}
           </>
         ) : (
           <>
@@ -1368,6 +1374,38 @@ const SupplierPortal = ({ data, setData, currentUser, onLogout }) => {
   const anexos = data.anexos.filter(a => pagamentos.some(p => p.id === a.pagamento_id));
   const [tab, setTab] = useState("dashboard");
   const [filterForma, setFilterForma] = useState("");
+  const [payModal, setPayModal] = useState(false);
+  const [payForm, setPayForm] = useState({ data_pagamento: new Date().toISOString().slice(0, 10), forma_pagamento: "PIX", tipo_anexo: "Comprovante" });
+
+  const enviarPagamentoFornecedor = () => {
+    if (!payForm.valor) return alert("Informe o valor do pagamento.");
+    if (!payForm.anexo_file && !payForm.anexo_nome) return alert("Anexe o comprovante ou a nota de bonificação.");
+    const next = { ...data, pagamentos: [...(data.pagamentos || [])], anexos: [...(data.anexos || [])], logs: [...(data.logs || [])] };
+    const id = next.nextId.pagamentos++;
+    const anexoNome = payForm.anexo_file?.name || payForm.anexo_nome || "";
+    const novo = {
+      id,
+      fornecedor_id: Number(currentUser.fornecedor_id),
+      valor: Number(payForm.valor),
+      forma_pagamento: payForm.forma_pagamento || "PIX",
+      numero_nfe: payForm.numero_nfe || "",
+      observacao: payForm.observacao || "Enviado pelo fornecedor para validação do administrador",
+      data_pagamento: payForm.data_pagamento || new Date().toISOString().slice(0, 10),
+      anexo_nome: anexoNome,
+      tipo_anexo: payForm.tipo_anexo || (payForm.forma_pagamento === "Bonificação" ? "Nota de bonificação" : "Comprovante"),
+      enviado_por: "Fornecedor",
+      confirmado: false,
+      status_confirmacao: "Aguardando confirmação",
+      created_at: new Date().toISOString()
+    };
+    next.pagamentos.push(novo);
+    next.anexos.push({ id: next.nextId.anexos++, pagamento_id: id, nome_arquivo: anexoNome, tipo_arquivo: novo.tipo_anexo, created_at: new Date().toISOString() });
+    next.logs.push({ id: next.nextId.logs++, usuario_id: currentUser.id, acao: "Envio", descricao: "Fornecedor enviou comprovante/nota para confirmação", ip: "127.0.0.1", created_at: new Date().toISOString() });
+    setData(next);
+    setPayModal(false);
+    setPayForm({ data_pagamento: new Date().toISOString().slice(0, 10), forma_pagamento: "PIX", tipo_anexo: "Comprovante" });
+    alert("Enviado para validação do administrador.");
+  };
 
   if (!forn) return (
     <div style={{ ...S.loginBox, textAlign: "center" }}>
@@ -1375,7 +1413,7 @@ const SupplierPortal = ({ data, setData, currentUser, onLogout }) => {
         <Icon name="info" size={48} color="#fff" />
         <h2>Cadastro em análise</h2>
         <p>Seu cadastro foi para análise. Aguarde o administrador vincular sua conta ao fornecedor correto.</p>
-        <button style={{ ...S.btn("outline"), color: "#fff", borderColor: "#fff" }} onClick={onLogout}>Sair</button>
+        <button style={{ ...S.btn("outline"), color: "#fff", borderColor: "#fff" }} onClick={onLogout}>Voltar para login</button>
       </div>
     </div>
   );
@@ -1663,15 +1701,15 @@ export default function App() {
   };
 
   // Portal de fornecedor
-  if (screen === "portal-login") return <LoginScreen onLogin={handleLogin} portalMode data={data} setData={setData} />;
+  if (screen === "portal-login") return <LoginScreen onLogin={handleLogin} portalMode data={data} setData={setData} onBackHome={() => setScreen("login")} />;
   if (screen === "portal" && currentUser?.tipo === "Fornecedor") return <SupplierPortal data={data} setData={setData} currentUser={currentUser} onLogout={handleLogout} />;
   if (screen === "login") {
     return (
       <div>
         <LoginScreen onLogin={handleLogin} data={data} setData={setData} />
         <div style={{ position: "fixed", bottom: 24, right: 24 }}>
-          <button style={{ ...S.btn("outline"), background: "#fff", boxShadow: "0 4px 20px rgba(0,0,0,0.1)" }} onClick={() => setScreen("portal-login")}>
-            <Icon name="portal" size={14} /> Portal Fornecedor
+          <button style={{ ...S.btn("primary"), background: COLORS.primary, color: "#fff", boxShadow: "0 10px 30px rgba(0,155,78,0.35)", padding: "14px 24px", fontSize: 15, borderRadius: 12 }} onClick={() => setScreen("portal-login")}>
+            <Icon name="portal" size={18} color="#fff" /> Portal do Fornecedor
           </button>
         </div>
       </div>
@@ -1730,8 +1768,8 @@ export default function App() {
             <span style={{ fontSize: 12, color: COLORS.textMuted }}>Sistema Online</span>
           </div>
           <div style={{ display: "flex", gap: 10, alignItems: "center" }}>
-            <button style={{ ...S.btn("outline", "sm") }} onClick={() => setScreen("portal-login")}>
-              <Icon name="portal" size={13} /> Portal Fornecedor
+            <button style={{ ...S.btn("primary"), padding: "10px 18px", fontSize: 14, borderRadius: 10 }} onClick={() => setScreen("portal-login")}>
+              <Icon name="portal" size={15} color="#fff" /> Portal do Fornecedor
             </button>
             <button style={{ ...S.btn("ghost", "sm"), color: COLORS.textMuted }} onClick={handleLogout}>
               <Icon name="logout" size={14} /> Sair

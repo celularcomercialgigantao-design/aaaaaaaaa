@@ -4,7 +4,15 @@
   "version": "1.0.0",
   "type": "module",
   "scripts": {
-    "build": "node build.js",
-    "start": "node build.js"
-  }
+    "dev": "vite",
+    "build": "vite build",
+    "preview": "vite preview"
+  },
+  "dependencies": {
+    "@vitejs/plugin-react": "latest",
+    "vite": "latest",
+    "react": "latest",
+    "react-dom": "latest"
+  },
+  "devDependencies": {}
 }
