@@ -687,21 +687,30 @@ const SuppliersScreen = ({ data, setData, currentUser, addLog }) => {
   };
 
   const aprovarFornecedor = (id) => {
-    const next = { ...data, fornecedores: data.fornecedores.map(f => Number(f.id) === Number(id) ? { ...f, ativo: true, status_cadastro: "Ativo" } : f) };
-    setData(next);
+    setData(prev => ({
+      ...prev,
+      fornecedores: (prev.fornecedores || []).map(f => Number(f.id) === Number(id) ? { ...f, ativo: true, status_cadastro: "Ativo" } : f)
+    }));
     addLog("Fornecedor aprovado pelo administrador");
+    alert("Fornecedor aprovado com sucesso.");
   };
 
   const rejeitarFornecedor = (id) => {
-    const next = { ...data, fornecedores: data.fornecedores.map(f => Number(f.id) === Number(id) ? { ...f, ativo: false, status_cadastro: "Rejeitado" } : f) };
-    setData(next);
+    setData(prev => ({
+      ...prev,
+      fornecedores: (prev.fornecedores || []).map(f => Number(f.id) === Number(id) ? { ...f, ativo: false, status_cadastro: "Rejeitado" } : f)
+    }));
     addLog("Fornecedor rejeitado pelo administrador");
+    alert("Fornecedor rejeitado.");
   };
 
   const inativarFornecedor = (id) => {
-    const next = { ...data, fornecedores: data.fornecedores.map(f => Number(f.id) === Number(id) ? { ...f, ativo: false, status_cadastro: "Inativo" } : f) };
-    setData(next);
+    setData(prev => ({
+      ...prev,
+      fornecedores: (prev.fornecedores || []).map(f => Number(f.id) === Number(id) ? { ...f, ativo: false, status_cadastro: "Inativo" } : f)
+    }));
     addLog("Fornecedor inativado pelo administrador");
+    alert("Fornecedor inativado.");
   };
 
   const doDelete = (id) => {
@@ -760,12 +769,12 @@ const SuppliersScreen = ({ data, setData, currentUser, addLog }) => {
                 <td style={{ ...S.td, color: COLORS.success, fontWeight: 600 }}>{fmt(f.saldo_pago)}</td>
                 <td style={S.td}>
                   <div style={{ display: "flex", gap: 6 }}>
-                    <button style={{ ...S.btn("outline", "sm"), padding: "5px 8px" }} onClick={() => openDetail(f)} title="Ver detalhes"><Icon name="eye" size={13} /></button>
-                    {canEdit && (f.status_cadastro !== "Ativo") && <button style={{ ...S.btn("success", "sm"), padding: "5px 8px" }} onClick={() => aprovarFornecedor(f.id)} title="Aprovar">Aprovar</button>}
-                    {canEdit && (f.status_cadastro !== "Rejeitado") && <button style={{ ...S.btn("warning", "sm"), padding: "5px 8px" }} onClick={() => rejeitarFornecedor(f.id)} title="Rejeitar">Rejeitar</button>}
-                    {canEdit && f.status_cadastro !== "Inativo" && <button style={{ ...S.btn("warning", "sm"), padding: "5px 8px" }} onClick={() => inativarFornecedor(f.id)} title="Inativar">Inativar</button>}
-                    {canEdit && <button style={{ ...S.btn("outline", "sm"), padding: "5px 8px" }} onClick={() => openEdit(f)} title="Editar"><Icon name="edit" size={13} /></button>}
-                    {canDelete && <button style={{ ...S.btn("danger", "sm"), padding: "5px 8px" }} onClick={() => setConfirm(f.id)} title="Excluir"><Icon name="trash" size={13} color="#fff" /></button>}
+                    <button type="button" style={{ ...S.btn("outline", "sm"), padding: "5px 8px" }} onClick={(e) => { e.preventDefault(); e.stopPropagation(); openDetail(f); }} title="Ver detalhes"><Icon name="eye" size={13} /></button>
+                    {canEdit && (f.status_cadastro !== "Ativo") && <button type="button" style={{ ...S.btn("success", "sm"), padding: "5px 8px" }} onClick={(e) => { e.preventDefault(); e.stopPropagation(); aprovarFornecedor(f.id); }} title="Aprovar">Aprovar</button>}
+                    {canEdit && (f.status_cadastro !== "Rejeitado") && <button type="button" style={{ ...S.btn("warning", "sm"), padding: "5px 8px" }} onClick={(e) => { e.preventDefault(); e.stopPropagation(); rejeitarFornecedor(f.id); }} title="Rejeitar">Rejeitar</button>}
+                    {canEdit && f.status_cadastro !== "Inativo" && <button type="button" style={{ ...S.btn("warning", "sm"), padding: "5px 8px" }} onClick={(e) => { e.preventDefault(); e.stopPropagation(); inativarFornecedor(f.id); }} title="Inativar">Inativar</button>}
+                    {canEdit && <button type="button" style={{ ...S.btn("outline", "sm"), padding: "5px 8px" }} onClick={(e) => { e.preventDefault(); e.stopPropagation(); openEdit(f); }} title="Editar"><Icon name="edit" size={13} /></button>}
+                    {canDelete && <button type="button" style={{ ...S.btn("danger", "sm"), padding: "5px 8px" }} onClick={(e) => { e.preventDefault(); e.stopPropagation(); setConfirm(f.id); }} title="Excluir"><Icon name="trash" size={13} color="#fff" /></button>}
                   </div>
                 </td>
               </tr>
@@ -891,21 +900,30 @@ const BuyersScreen = ({ data, setData, currentUser, addLog }) => {
   };
 
   const aprovarBuyer = (id) => {
-    const next = { ...data, compradores: data.compradores.map(c => Number(c.id) === Number(id) ? { ...c, ativo: true, status_cadastro: "Ativo" } : c) };
-    setData(next);
+    setData(prev => ({
+      ...prev,
+      compradores: (prev.compradores || []).map(c => Number(c.id) === Number(id) ? { ...c, ativo: true, status_cadastro: "Ativo" } : c)
+    }));
     addLog("Comprador aprovado pelo administrador");
+    alert("Comprador aprovado com sucesso.");
   };
 
   const rejeitarBuyer = (id) => {
-    const next = { ...data, compradores: data.compradores.map(c => Number(c.id) === Number(id) ? { ...c, ativo: false, status_cadastro: "Rejeitado" } : c) };
-    setData(next);
+    setData(prev => ({
+      ...prev,
+      compradores: (prev.compradores || []).map(c => Number(c.id) === Number(id) ? { ...c, ativo: false, status_cadastro: "Rejeitado" } : c)
+    }));
     addLog("Comprador rejeitado pelo administrador");
+    alert("Comprador rejeitado.");
   };
 
   const inativarBuyer = (id) => {
-    const next = { ...data, compradores: data.compradores.map(c => Number(c.id) === Number(id) ? { ...c, ativo: false, status_cadastro: "Inativo" } : c) };
-    setData(next);
+    setData(prev => ({
+      ...prev,
+      compradores: (prev.compradores || []).map(c => Number(c.id) === Number(id) ? { ...c, ativo: false, status_cadastro: "Inativo" } : c)
+    }));
     addLog("Comprador inativado pelo administrador");
+    alert("Comprador inativado.");
   };
 
   const doDelete = (id) => {
@@ -951,11 +969,11 @@ const BuyersScreen = ({ data, setData, currentUser, addLog }) => {
                   <td style={{ ...S.td, color: r.saldo >= 0 ? COLORS.success : COLORS.danger, fontWeight: 700 }}>{fmt(r.saldo)}</td>
                   <td style={S.td}>
                     <div style={{ display: "flex", gap: 6, flexWrap: "wrap" }}>
-                      <button style={{ ...S.btn("outline", "sm"), padding: "5px 8px" }} onClick={() => openEdit(c)}><Icon name="edit" size={13} /></button>
-                      {currentUser.tipo === "Administrador" && c.status_cadastro !== "Ativo" && <button style={{ ...S.btn("success", "sm"), padding: "5px 8px" }} onClick={() => aprovarBuyer(c.id)}>Aprovar</button>}
-                      {currentUser.tipo === "Administrador" && c.status_cadastro !== "Rejeitado" && <button style={{ ...S.btn("warning", "sm"), padding: "5px 8px" }} onClick={() => rejeitarBuyer(c.id)}>Rejeitar</button>}
-                      {currentUser.tipo === "Administrador" && c.status_cadastro !== "Inativo" && <button style={{ ...S.btn("warning", "sm"), padding: "5px 8px" }} onClick={() => inativarBuyer(c.id)}>Inativar</button>}
-                      {currentUser.tipo === "Administrador" && <button style={{ ...S.btn("danger", "sm"), padding: "5px 8px" }} onClick={() => setConfirm(c.id)}><Icon name="trash" size={13} color="#fff" /></button>}
+                      <button type="button" style={{ ...S.btn("outline", "sm"), padding: "5px 8px" }} onClick={(e) => { e.preventDefault(); e.stopPropagation(); openEdit(c); }}><Icon name="edit" size={13} /></button>
+                      {currentUser.tipo === "Administrador" && c.status_cadastro !== "Ativo" && <button type="button" style={{ ...S.btn("success", "sm"), padding: "5px 8px" }} onClick={(e) => { e.preventDefault(); e.stopPropagation(); aprovarBuyer(c.id); }}>Aprovar</button>}
+                      {currentUser.tipo === "Administrador" && c.status_cadastro !== "Rejeitado" && <button type="button" style={{ ...S.btn("warning", "sm"), padding: "5px 8px" }} onClick={(e) => { e.preventDefault(); e.stopPropagation(); rejeitarBuyer(c.id); }}>Rejeitar</button>}
+                      {currentUser.tipo === "Administrador" && c.status_cadastro !== "Inativo" && <button type="button" style={{ ...S.btn("warning", "sm"), padding: "5px 8px" }} onClick={(e) => { e.preventDefault(); e.stopPropagation(); inativarBuyer(c.id); }}>Inativar</button>}
+                      {currentUser.tipo === "Administrador" && <button type="button" style={{ ...S.btn("danger", "sm"), padding: "5px 8px" }} onClick={(e) => { e.preventDefault(); e.stopPropagation(); setConfirm(c.id); }}><Icon name="trash" size={13} color="#fff" /></button>}
                     </div>
                   </td>
                 </tr>
