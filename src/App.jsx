@@ -35,8 +35,8 @@ const ESTADOS = ["AC","AL","AM","AP","BA","CE","DF","ES","GO","MA","MG","MS","MT
 // ─── INITIAL DATA ────────────────────────────────────────────────────────────
 const initData = () => {
   const stored = localStorage.getItem("saas_data");
-  if (stored) return JSON.parse(stored);
-  return {
+  if (stored) return normalizeData(JSON.parse(stored));
+  return normalizeData({
     users: [
       { id: 1, nome: "Administrador Master", email: "admin@sistema.com", senha: "admin123", tipo: "Administrador", fornecedor_id: null, ativo: true, created_at: "2024-01-01" },
       { id: 2, nome: "João Operador", email: "operador@sistema.com", senha: "op123", tipo: "Operador", fornecedor_id: null, ativo: true, created_at: "2024-01-15" },
@@ -67,9 +67,47 @@ const initData = () => {
       { id: 2, usuario_id: 1, acao: "Cadastro", descricao: "Fornecedor ABC Distribuidora cadastrado", ip: "192.168.1.1", created_at: "2024-04-20T08:30:00" },
       { id: 3, usuario_id: 2, acao: "Login", descricao: "Login realizado com sucesso", ip: "192.168.1.2", created_at: "2024-04-20T09:00:00" },
     ],
-    nextId: { users: 4, fornecedores: 4, pagamentos: 9, anexos: 4, logs: 4 },
-  };
+    compradores: [
+      { id: 1, nome: "Lucas Magalhães", email: "lucas@gigantao.com", cargo: "Comprador", centro_custo: "Comercial", ativo: true, status_cadastro: "Ativo", created_at: "2024-01-01" },
+      { id: 2, nome: "João Comprador", email: "joao@gigantao.com", cargo: "Comprador", centro_custo: "Comercial", ativo: true, status_cadastro: "Ativo", created_at: "2024-01-02" },
+    ],
+    nextId: { users: 4, fornecedores: 4, pagamentos: 9, anexos: 4, logs: 4, compradores: 3 },
+  });
 };
+
+function normalizeData(raw) {
+  const data = raw || {};
+  data.users = Array.isArray(data.users) ? data.users : [];
+  data.fornecedores = Array.isArray(data.fornecedores) ? data.fornecedores : [];
+  data.pagamentos = Array.isArray(data.pagamentos) ? data.pagamentos : [];
+  data.anexos = Array.isArray(data.anexos) ? data.anexos : [];
+  data.logs = Array.isArray(data.logs) ? data.logs : [];
+  data.compradores = Array.isArray(data.compradores) ? data.compradores : [
+    { id: 1, nome: "Lucas Magalhães", email: "lucas@gigantao.com", cargo: "Comprador", centro_custo: "Comercial", ativo: true, status_cadastro: "Ativo", created_at: "2024-01-01" },
+    { id: 2, nome: "João Comprador", email: "joao@gigantao.com", cargo: "Comprador", centro_custo: "Comercial", ativo: true, status_cadastro: "Ativo", created_at: "2024-01-02" },
+  ];
+  data.nextId = data.nextId || {};
+  data.nextId.users = data.nextId.users || (Math.max(0, ...data.users.map(x => Number(x.id) || 0)) + 1);
+  data.nextId.fornecedores = data.nextId.fornecedores || (Math.max(0, ...data.fornecedores.map(x => Number(x.id) || 0)) + 1);
+  data.nextId.pagamentos = data.nextId.pagamentos || (Math.max(0, ...data.pagamentos.map(x => Number(x.id) || 0)) + 1);
+  data.nextId.anexos = data.nextId.anexos || (Math.max(0, ...data.anexos.map(x => Number(x.id) || 0)) + 1);
+  data.nextId.logs = data.nextId.logs || (Math.max(0, ...data.logs.map(x => Number(x.id) || 0)) + 1);
+  data.nextId.compradores = data.nextId.compradores || (Math.max(0, ...data.compradores.map(x => Number(x.id) || 0)) + 1);
+  data.users = data.users.map(u => ({ ...u, ativo: u.ativo === true, status_cadastro: u.status_cadastro || (u.ativo ? "Ativo" : "Em análise") }));
+  data.compradores = data.compradores.map(c => ({ ...c, ativo: c.ativo !== false, status_cadastro: c.status_cadastro || (c.ativo === false ? "Em análise" : "Ativo") }));
+  data.fornecedores = data.fornecedores.map(f => ({ ...f, ativo: f.ativo !== false, status_cadastro: f.status_cadastro || "Ativo" }));
+  data.pagamentos = data.pagamentos.map(p => ({
+    ...p,
+    fornecedor_id: p.fornecedor_id ? Number(p.fornecedor_id) : null,
+    comprador_id: p.comprador_id ? Number(p.comprador_id) : null,
+    valor: Number(p.valor_pago ?? p.valor ?? 0),
+    valor_pago: Number(p.valor_pago ?? p.valor ?? 0),
+    valor_devido: Number(p.valor_devido ?? p.valor ?? 0),
+    confirmado: p.confirmado === false ? false : true,
+    status_confirmacao: p.status_confirmacao || (p.confirmado === false ? "Aguardando confirmação" : "Confirmado")
+  }));
+  return data;
+}
 
 // ─── STYLES ──────────────────────────────────────────────────────────────────
 const S = {
@@ -202,23 +240,34 @@ const fileToDataUrl = (file) => new Promise((resolve, reject) => {
 });
 
 const downloadArquivo = (arquivo, pagamento) => {
-  const nome = arquivo?.nome_arquivo || pagamento?.anexo_nome || pagamento?.numero_nfe || 'arquivo';
-  const dataUrl = arquivo?.data_url || pagamento?.anexo_data;
-  const mime = arquivo?.mime || pagamento?.anexo_mime || 'text/plain;charset=utf-8';
+  const original = arquivo?.nome_arquivo || pagamento?.anexo_nome || pagamento?.numero_nfe || "arquivo";
+  const dataUrl = arquivo?.data_url || pagamento?.anexo_data || "";
+  const mime = arquivo?.mime || pagamento?.anexo_mime || "";
+  const extFromMime = mime.includes("pdf") ? ".pdf" : mime.includes("jpeg") ? ".jpg" : mime.includes("png") ? ".png" : mime.includes("xml") ? ".xml" : "";
+  const temExt = /\.[a-z0-9]{2,5}$/i.test(original);
+  const nome = temExt ? original : `${original}${extFromMime || ".txt"}`;
+
   let href = dataUrl;
-  if (!href) {
-    const texto = `Arquivo registrado no sistema Gigantão\nNome: ${nome}\nNF-e: ${pagamento?.numero_nfe || '-'}\nValor: ${pagamento?.valor ? fmt(pagamento.valor) : '-'}\nObservação: ${pagamento?.observacao || '-'}`;
-    href = URL.createObjectURL(new Blob([texto], { type: mime }));
+  let revoke = false;
+
+  if (!href || !String(href).startsWith("data:")) {
+    const texto = `Arquivo não possui conteúdo anexado.
+Nome: ${nome}
+NF-e: ${pagamento?.numero_nfe || "-"}
+Valor: ${pagamento?.valor ? fmt(pagamento.valor) : "-"}
+Observação: ${pagamento?.observacao || "-"}`;
+    href = URL.createObjectURL(new Blob([texto], { type: "text/plain;charset=utf-8" }));
+    revoke = true;
   }
-  const a = document.createElement('a');
+
+  const a = document.createElement("a");
   a.href = href;
   a.download = nome;
   document.body.appendChild(a);
   a.click();
   a.remove();
-  if (!dataUrl) setTimeout(() => URL.revokeObjectURL(href), 1000);
+  if (revoke) setTimeout(() => URL.revokeObjectURL(href), 1000);
 };
-
 const fmtDate = (d) => d ? new Date(d + "T00:00:00").toLocaleDateString("pt-BR") : "-";
 
 // ─── METRIC CARD ──────────────────────────────────────────────────────────────
@@ -361,7 +410,7 @@ const LoginScreen = ({ onLogin, portalMode, data, setData, onBackHome }) => {
       senha: cadastro.senha,
       tipo,
       fornecedor_id: fornecedorId,
-      ativo: portalMode ? false : true,
+      ativo: false,
       fornecedor_pendente: portalMode ? {
         razao_social: cadastro.razao_social,
         nome_fantasia: cadastro.nome_fantasia,
@@ -371,7 +420,7 @@ const LoginScreen = ({ onLogin, portalMode, data, setData, onBackHome }) => {
         cidade: cadastro.cidade,
         estado: cadastro.estado || "SP"
       } : null,
-      status_cadastro: portalMode ? "Em análise" : "Ativo",
+      status_cadastro: "Em análise",
       created_at: new Date().toISOString().slice(0, 10)
     };
 
@@ -389,7 +438,7 @@ const LoginScreen = ({ onLogin, portalMode, data, setData, onBackHome }) => {
     setEmail(cadastro.email);
     setSenha(cadastro.senha);
     setModo("login");
-    setError(portalMode ? "Seu cadastro foi para análise. Aguarde o administrador vincular sua conta ao fornecedor." : `Cadastro realizado como ${tipo}. Agora clique em Entrar.`);
+    setError(portalMode ? "Seu cadastro foi para análise. Aguarde o administrador vincular sua conta ao fornecedor." : `Cadastro realizado como ${tipo}. Aguarde aprovação do administrador para acessar.`);
   };
 
   const renderCadastroField = (label, field, type = "text", opts) => (
@@ -481,54 +530,101 @@ const LoginScreen = ({ onLogin, portalMode, data, setData, onBackHome }) => {
 
 // ─── DASHBOARD ────────────────────────────────────────────────────────────────
 const Dashboard = ({ data, currentUser }) => {
-  const totalDevido = data.fornecedores.reduce((s, f) => s + f.saldo_devido, 0);
-  const totalPago = data.fornecedores.reduce((s, f) => s + f.saldo_pago, 0);
-  const totalBonif = data.fornecedores.reduce((s, f) => s + f.saldo_bonificado, 0);
-  const recentPagamentos = [...data.pagamentos].sort((a, b) => b.id - a.id).slice(0, 6);
+  const [inicio, setInicio] = useState("");
+  const [fim, setFim] = useState("");
+  const inPeriod = (p) => {
+    const d = p.data_pagamento || p.created_at?.slice(0, 10) || "";
+    return (!inicio || d >= inicio) && (!fim || d <= fim);
+  };
+  const pagamentosPeriodo = (data.pagamentos || []).filter(inPeriod).filter(p => p.confirmado !== false);
+  const totalDevido = pagamentosPeriodo.reduce((s, p) => s + Number(p.valor_devido || 0), 0);
+  const totalPago = pagamentosPeriodo.reduce((s, p) => s + Number(p.valor_pago ?? p.valor ?? 0), 0);
+  const saldoTotalPositivo = pagamentosPeriodo.reduce((s, p) => s + Math.max(0, Number(p.valor_pago ?? p.valor ?? 0) - Number(p.valor_devido || 0)), 0);
 
+  const porComprador = (data.compradores || []).map(c => {
+    const itens = pagamentosPeriodo.filter(p => Number(p.comprador_id) === Number(c.id));
+    const devido = itens.reduce((s, p) => s + Number(p.valor_devido || 0), 0);
+    const pago = itens.reduce((s, p) => s + Number(p.valor_pago ?? p.valor ?? 0), 0);
+    return { ...c, devido, pago, saldo: pago - devido, positivo: Math.max(0, pago - devido) };
+  }).filter(c => c.devido || c.pago).sort((a, b) => b.pago - a.pago);
+
+  const recentPagamentos = [...pagamentosPeriodo].sort((a, b) => b.id - a.id).slice(0, 6);
   const months = ["Jan", "Fev", "Mar", "Abr", "Mai", "Jun"];
-  const pagByMonth = months.map((_, i) => data.pagamentos.filter(p => new Date(p.data_pagamento).getMonth() === i && p.forma_pagamento !== "Bonificação").reduce((s, p) => s + p.valor, 0));
-  const bonByMonth = months.map((_, i) => data.pagamentos.filter(p => new Date(p.data_pagamento).getMonth() === i && p.forma_pagamento === "Bonificação").reduce((s, p) => s + p.valor, 0));
+  const pagByMonth = months.map((_, i) => pagamentosPeriodo.filter(p => new Date(p.data_pagamento).getMonth() === i).reduce((s, p) => s + Number(p.valor_pago ?? p.valor ?? 0), 0));
 
   return (
     <div>
       <h1 style={S.pageTitle}>Dashboard</h1>
-      <p style={S.pageSub}>Visão geral do sistema financeiro</p>
+      <p style={S.pageSub}>Visão geral por período, comprador, fornecedor e pagamentos confirmados</p>
+
+      <div style={{ ...S.card, marginBottom: 16 }}>
+        <div style={{ display: "flex", gap: 10, alignItems: "end", flexWrap: "wrap" }}>
+          <div style={S.formRow}>
+            <label style={S.label}>Data inicial</label>
+            <input style={S.input} type="date" value={inicio} onChange={e => setInicio(e.target.value)} />
+          </div>
+          <div style={S.formRow}>
+            <label style={S.label}>Data final</label>
+            <input style={S.input} type="date" value={fim} onChange={e => setFim(e.target.value)} />
+          </div>
+          <button style={S.btn("outline")} onClick={() => { setInicio(""); setFim(""); }}>Limpar filtro</button>
+        </div>
+      </div>
+
       <div style={S.grid(3)}>
-        <MetricCard label="Total Devido" value={fmt(totalDevido)} icon="payments" color={COLORS.danger} sub={`${data.fornecedores.length} fornecedores`} />
-        <MetricCard label="Total Pago" value={fmt(totalPago)} icon="check" color={COLORS.success} sub={`${data.pagamentos.length} pagamentos`} />
-        <MetricCard label="Total Bonificado" value={fmt(totalBonif)} icon="info" color={COLORS.warning} />
+        <MetricCard label="Valor Total Geral Devido" value={fmt(totalDevido)} icon="payments" color={COLORS.danger} sub={`${pagamentosPeriodo.length} lançamentos`} />
+        <MetricCard label="Valor Total Pago" value={fmt(totalPago)} icon="check" color={COLORS.success} sub="Pagamentos confirmados" />
+        <MetricCard label="Saldo Total Positivo" value={fmt(saldoTotalPositivo)} icon="info" color={COLORS.warning} sub="Pago acima do devido" />
       </div>
+
       <div style={{ ...S.grid(2), marginTop: 16 }}>
-        <MetricCard label="Fornecedores Ativos" value={data.fornecedores.length} icon="suppliers" color={COLORS.primary} />
-        <MetricCard label="Saldo Pendente" value={fmt(totalDevido)} icon="filter" color="#9333ea" />
+        <MetricCard label="Compradores Cadastrados" value={(data.compradores || []).length} icon="users" color={COLORS.primary} />
+        <MetricCard label="Fornecedores Cadastrados" value={(data.fornecedores || []).length} icon="suppliers" color="#9333ea" />
       </div>
+
       <div style={{ ...S.grid(2), marginTop: 16 }}>
         <div style={S.card}>
           <p style={{ ...S.cardTitle, marginBottom: 12, fontSize: 14, fontWeight: 600, color: COLORS.text }}>Pagamentos por Mês</p>
           <SimpleChart type="bar" data={pagByMonth} labels={months} color={COLORS.primary} height={160} />
         </div>
         <div style={S.card}>
-          <p style={{ ...S.cardTitle, marginBottom: 12, fontSize: 14, fontWeight: 600, color: COLORS.text }}>Evolução Financeira</p>
-          <SimpleChart type="line" data={pagByMonth} labels={months} color={COLORS.success} height={160} />
+          <p style={{ ...S.cardTitle, marginBottom: 12, fontSize: 14, fontWeight: 600, color: COLORS.text }}>Carteira por Comprador</p>
+          <table style={S.table}>
+            <thead><tr>{["Comprador", "Total Devido", "Total Pago", "Saldo"].map(h => <th key={h} style={S.th}>{h}</th>)}</tr></thead>
+            <tbody>
+              {porComprador.length === 0 && <tr><td colSpan={4} style={{ ...S.td, textAlign: "center", color: COLORS.textMuted }}>Sem movimentação no período</td></tr>}
+              {porComprador.map(c => (
+                <tr key={c.id}>
+                  <td style={S.td}>{c.nome}</td>
+                  <td style={{ ...S.td, color: COLORS.danger, fontWeight: 600 }}>{fmt(c.devido)}</td>
+                  <td style={{ ...S.td, color: COLORS.success, fontWeight: 600 }}>{fmt(c.pago)}</td>
+                  <td style={{ ...S.td, color: c.saldo >= 0 ? COLORS.success : COLORS.danger, fontWeight: 700 }}>{fmt(c.saldo)}</td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
         </div>
       </div>
+
       <div style={{ ...S.card, marginTop: 16 }}>
         <p style={{ ...S.cardTitle, fontSize: 14, fontWeight: 600, color: COLORS.text, marginBottom: 14 }}>Últimos Pagamentos</p>
         <table style={S.table}>
           <thead>
-            <tr>
-              {["Fornecedor", "Valor", "Forma", "NF-e", "Data"].map(h => <th key={h} style={S.th}>{h}</th>)}
-            </tr>
+            <tr>{["Fornecedor", "Comprador", "Devido", "Pago", "Saldo", "NF-e", "Data"].map(h => <th key={h} style={S.th}>{h}</th>)}</tr>
           </thead>
           <tbody>
             {recentPagamentos.map(p => {
               const forn = data.fornecedores.find(f => f.id === p.fornecedor_id);
+              const comp = data.compradores?.find(c => Number(c.id) === Number(p.comprador_id));
+              const devido = Number(p.valor_devido || 0);
+              const pago = Number(p.valor_pago ?? p.valor ?? 0);
               return (
                 <tr key={p.id}>
                   <td style={S.td}>{forn?.nome_fantasia || forn?.razao_social || "-"}</td>
-                  <td style={{ ...S.td, color: COLORS.success, fontWeight: 600 }}>{fmt(p.valor)}</td>
-                  <td style={S.td}><StatusBadge status={p.forma_pagamento === "Bonificação" ? "Bonificado" : "Pago"} /></td>
+                  <td style={S.td}>{comp?.nome || "Sem comprador"}</td>
+                  <td style={{ ...S.td, color: COLORS.danger, fontWeight: 600 }}>{fmt(devido)}</td>
+                  <td style={{ ...S.td, color: COLORS.success, fontWeight: 600 }}>{fmt(pago)}</td>
+                  <td style={{ ...S.td, color: pago - devido >= 0 ? COLORS.success : COLORS.danger, fontWeight: 700 }}>{fmt(pago - devido)}</td>
                   <td style={{ ...S.td, fontFamily: "monospace", fontSize: 12 }}>{p.numero_nfe}</td>
                   <td style={S.td}>{fmtDate(p.data_pagamento)}</td>
                 </tr>
@@ -541,7 +637,7 @@ const Dashboard = ({ data, currentUser }) => {
   );
 };
 
-// ─── SUPPLIERS SCREEN ─────────────────────────────────────────────────────────
+// ─── SUPPLIERS SCREEN// ─── SUPPLIERS SCREEN ─────────────────────────────────────────────────────────
 const SuppliersScreen = ({ data, setData, currentUser, addLog }) => {
   const [search, setSearch] = useState("");
   const [modal, setModal] = useState(null);
@@ -567,7 +663,7 @@ const SuppliersScreen = ({ data, setData, currentUser, addLog }) => {
     const next = { ...data };
     if (modal === "new") {
       const id = next.nextId.fornecedores++;
-      next.fornecedores.push({ ...form, id, saldo_devido: 0, saldo_pago: 0, saldo_bonificado: 0, created_at: new Date().toISOString().slice(0, 10) });
+      next.fornecedores.push({ ...form, id, ativo: false, status_cadastro: "Em análise", saldo_devido: 0, saldo_pago: 0, saldo_bonificado: 0, created_at: new Date().toISOString().slice(0, 10) });
       addLog(`Fornecedor ${form.razao_social} cadastrado`);
     } else {
       next.fornecedores = next.fornecedores.map(f => f.id === form.id ? { ...f, ...form } : f);
@@ -575,6 +671,18 @@ const SuppliersScreen = ({ data, setData, currentUser, addLog }) => {
     }
     setData(next);
     setModal(null);
+  };
+
+  const aprovarFornecedor = (id) => {
+    const next = { ...data, fornecedores: data.fornecedores.map(f => Number(f.id) === Number(id) ? { ...f, ativo: true, status_cadastro: "Ativo" } : f) };
+    setData(next);
+    addLog("Fornecedor aprovado pelo administrador");
+  };
+
+  const rejeitarFornecedor = (id) => {
+    const next = { ...data, fornecedores: data.fornecedores.map(f => Number(f.id) === Number(id) ? { ...f, ativo: false, status_cadastro: "Rejeitado" } : f) };
+    setData(next);
+    addLog("Fornecedor rejeitado pelo administrador");
   };
 
   const doDelete = (id) => {
@@ -615,7 +723,7 @@ const SuppliersScreen = ({ data, setData, currentUser, addLog }) => {
       <div style={S.card}>
         <table style={S.table}>
           <thead>
-            <tr>{["Razão Social / Fantasia", "CNPJ", "Contato", "Cidade/UF", "Saldo Devido", "Saldo Pago", "Ações"].map(h => <th key={h} style={S.th}>{h}</th>)}</tr>
+            <tr>{["Razão Social / Fantasia", "CNPJ", "Contato", "Cidade/UF", "Status", "Saldo Devido", "Saldo Pago", "Ações"].map(h => <th key={h} style={S.th}>{h}</th>)}</tr>
           </thead>
           <tbody>
             {filtered.length === 0 && <tr><td colSpan={8} style={{ ...S.td, textAlign: "center", color: COLORS.textMuted, padding: 32 }}>Nenhum fornecedor encontrado</td></tr>}
@@ -628,11 +736,14 @@ const SuppliersScreen = ({ data, setData, currentUser, addLog }) => {
                 <td style={{ ...S.td, fontFamily: "monospace", fontSize: 12 }}>{f.cnpj}</td>
                 <td style={S.td}>{f.contato || f.email}</td>
                 <td style={S.td}>{f.cidade}/{f.estado}</td>
+                <td style={S.td}><StatusBadge status={f.status_cadastro || (f.ativo === false ? "Em análise" : "Ativo")} /></td>
                 <td style={{ ...S.td, color: COLORS.danger, fontWeight: 600 }}>{fmt(f.saldo_devido)}</td>
                 <td style={{ ...S.td, color: COLORS.success, fontWeight: 600 }}>{fmt(f.saldo_pago)}</td>
                 <td style={S.td}>
                   <div style={{ display: "flex", gap: 6 }}>
                     <button style={{ ...S.btn("outline", "sm"), padding: "5px 8px" }} onClick={() => openDetail(f)} title="Ver detalhes"><Icon name="eye" size={13} /></button>
+                    {canEdit && (f.status_cadastro !== "Ativo") && <button style={{ ...S.btn("success", "sm"), padding: "5px 8px" }} onClick={() => aprovarFornecedor(f.id)} title="Aprovar">Aprovar</button>}
+                    {canEdit && (f.status_cadastro !== "Rejeitado") && <button style={{ ...S.btn("warning", "sm"), padding: "5px 8px" }} onClick={() => rejeitarFornecedor(f.id)} title="Rejeitar">Rejeitar</button>}
                     {canEdit && <button style={{ ...S.btn("outline", "sm"), padding: "5px 8px" }} onClick={() => openEdit(f)} title="Editar"><Icon name="edit" size={13} /></button>}
                     {canDelete && <button style={{ ...S.btn("danger", "sm"), padding: "5px 8px" }} onClick={() => setConfirm(f.id)} title="Excluir"><Icon name="trash" size={13} color="#fff" /></button>}
                   </div>
@@ -708,88 +819,214 @@ const SuppliersScreen = ({ data, setData, currentUser, addLog }) => {
   );
 };
 
+// ─── BUYERS SCREEN ────────────────────────────────────────────────────────────
+const BuyersScreen = ({ data, setData, currentUser, addLog }) => {
+  const [search, setSearch] = useState("");
+  const [modal, setModal] = useState(null);
+  const [form, setForm] = useState({});
+  const [confirm, setConfirm] = useState(null);
+  const [sort, setSort] = useState({ key: "nome", dir: 1 });
+
+  const ordenar = (key) => setSort(prev => ({ key, dir: prev.key === key ? prev.dir * -1 : 1 }));
+  const ativos = data.compradores || [];
+
+  const resumoComprador = (id) => {
+    const itens = (data.pagamentos || []).filter(p => p.confirmado !== false && Number(p.comprador_id) === Number(id));
+    const devido = itens.reduce((s, p) => s + Number(p.valor_devido || 0), 0);
+    const pago = itens.reduce((s, p) => s + Number(p.valor_pago ?? p.valor ?? 0), 0);
+    return { devido, pago, saldo: pago - devido };
+  };
+
+  const filtered = ativos
+    .filter(c => !search || [c.nome, c.email, c.cargo, c.centro_custo].join(" ").toLowerCase().includes(search.toLowerCase()))
+    .sort((a, b) => {
+      const av = String(a[sort.key] || "").toLowerCase();
+      const bv = String(b[sort.key] || "").toLowerCase();
+      return av.localeCompare(bv) * sort.dir;
+    });
+
+  const openNew = () => { setForm({ ativo: true, status_cadastro: "Em análise", cargo: "Comprador" }); setModal("new"); };
+  const openEdit = (c) => { setForm({ ...c }); setModal("edit"); };
+
+  const saveBuyer = () => {
+    if (!form.nome) return alert("Informe o nome do comprador.");
+    const next = { ...data, compradores: [...(data.compradores || [])] };
+    if (modal === "new") {
+      const id = next.nextId.compradores++;
+      next.compradores.push({
+        ...form,
+        id,
+        ativo: false,
+        status_cadastro: "Em análise",
+        created_at: new Date().toISOString().slice(0, 10)
+      });
+      addLog(`Comprador ${form.nome} cadastrado e enviado para aprovação`);
+      alert("Comprador cadastrado. O administrador precisa aprovar para ficar ativo.");
+    } else {
+      next.compradores = next.compradores.map(c => Number(c.id) === Number(form.id) ? { ...c, ...form } : c);
+      addLog(`Comprador ${form.nome} atualizado`);
+    }
+    setData(next);
+    setModal(null);
+  };
+
+  const aprovarBuyer = (id) => {
+    const next = { ...data, compradores: data.compradores.map(c => Number(c.id) === Number(id) ? { ...c, ativo: true, status_cadastro: "Ativo" } : c) };
+    setData(next);
+    addLog("Comprador aprovado pelo administrador");
+  };
+
+  const rejeitarBuyer = (id) => {
+    const next = { ...data, compradores: data.compradores.map(c => Number(c.id) === Number(id) ? { ...c, ativo: false, status_cadastro: "Rejeitado" } : c) };
+    setData(next);
+    addLog("Comprador rejeitado pelo administrador");
+  };
+
+  const doDelete = (id) => {
+    const next = { ...data, compradores: data.compradores.filter(c => Number(c.id) !== Number(id)) };
+    setData(next);
+    setConfirm(null);
+    addLog("Comprador excluído");
+  };
+
+  return (
+    <div>
+      <h1 style={S.pageTitle}>Compradores</h1>
+      <p style={S.pageSub}>Cadastro de compradores e carteira financeira por comprador</p>
+
+      <div style={S.searchBar}>
+        <input style={{ ...S.input, flex: 1 }} placeholder="Buscar comprador..." value={search} onChange={e => setSearch(e.target.value)} />
+        <button style={S.btn("primary")} onClick={openNew}><Icon name="plus" size={15} color="#fff" /> Novo Comprador</button>
+      </div>
+
+      <div style={S.card}>
+        <table style={S.table}>
+          <thead>
+            <tr>
+              {[
+                ["nome", "Comprador"], ["email", "E-mail"], ["cargo", "Cargo"], ["centro_custo", "Centro de Custo"]
+              ].map(([key, label]) => <th key={key} style={{ ...S.th, cursor: "pointer" }} onClick={() => ordenar(key)}>{label} {sort.key === key ? (sort.dir === 1 ? "▲" : "▼") : ""}</th>)}
+              {["Status", "Total Devido", "Total Pago", "Saldo", "Ações"].map(h => <th key={h} style={S.th}>{h}</th>)}
+            </tr>
+          </thead>
+          <tbody>
+            {filtered.length === 0 && <tr><td colSpan={9} style={{ ...S.td, textAlign: "center", color: COLORS.textMuted, padding: 32 }}>Nenhum comprador encontrado</td></tr>}
+            {filtered.map(c => {
+              const r = resumoComprador(c.id);
+              return (
+                <tr key={c.id}>
+                  <td style={S.td}><strong>{c.nome}</strong></td>
+                  <td style={S.td}>{c.email || "-"}</td>
+                  <td style={S.td}>{c.cargo || "-"}</td>
+                  <td style={S.td}>{c.centro_custo || "-"}</td>
+                  <td style={S.td}><StatusBadge status={c.status_cadastro || (c.ativo ? "Ativo" : "Em análise")} /></td>
+                  <td style={{ ...S.td, color: COLORS.danger, fontWeight: 600 }}>{fmt(r.devido)}</td>
+                  <td style={{ ...S.td, color: COLORS.success, fontWeight: 600 }}>{fmt(r.pago)}</td>
+                  <td style={{ ...S.td, color: r.saldo >= 0 ? COLORS.success : COLORS.danger, fontWeight: 700 }}>{fmt(r.saldo)}</td>
+                  <td style={S.td}>
+                    <div style={{ display: "flex", gap: 6, flexWrap: "wrap" }}>
+                      <button style={{ ...S.btn("outline", "sm"), padding: "5px 8px" }} onClick={() => openEdit(c)}><Icon name="edit" size={13} /></button>
+                      {currentUser.tipo === "Administrador" && c.status_cadastro !== "Ativo" && <button style={{ ...S.btn("success", "sm"), padding: "5px 8px" }} onClick={() => aprovarBuyer(c.id)}>Aprovar</button>}
+                      {currentUser.tipo === "Administrador" && c.status_cadastro !== "Rejeitado" && <button style={{ ...S.btn("warning", "sm"), padding: "5px 8px" }} onClick={() => rejeitarBuyer(c.id)}>Rejeitar</button>}
+                      {currentUser.tipo === "Administrador" && <button style={{ ...S.btn("danger", "sm"), padding: "5px 8px" }} onClick={() => setConfirm(c.id)}><Icon name="trash" size={13} color="#fff" /></button>}
+                    </div>
+                  </td>
+                </tr>
+              );
+            })}
+          </tbody>
+        </table>
+      </div>
+
+      {(modal === "new" || modal === "edit") && (
+        <Modal title={modal === "new" ? "Novo Comprador" : "Editar Comprador"} onClose={() => setModal(null)}>
+          {[
+            ["Nome *", "nome"], ["E-mail", "email"], ["Cargo", "cargo"], ["Centro de custo", "centro_custo"]
+          ].map(([label, field]) => (
+            <div style={S.formRow} key={field}>
+              <label style={S.label}>{label}</label>
+              <input style={S.input} value={form[field] || ""} onChange={e => setForm(p => ({ ...p, [field]: e.target.value }))} />
+            </div>
+          ))}
+          {modal === "edit" && currentUser.tipo === "Administrador" && (
+            <div style={S.formRow}>
+              <label style={S.label}>Status</label>
+              <select style={S.select} value={form.status_cadastro || ""} onChange={e => setForm(p => ({ ...p, status_cadastro: e.target.value, ativo: e.target.value === "Ativo" }))}>
+                <option value="Em análise">Em análise</option>
+                <option value="Ativo">Ativo</option>
+                <option value="Rejeitado">Rejeitado</option>
+              </select>
+            </div>
+          )}
+          <div style={{ display: "flex", gap: 10, justifyContent: "flex-end", marginTop: 8 }}>
+            <button style={S.btn("outline")} onClick={() => setModal(null)}>Cancelar</button>
+            <button style={S.btn("primary")} onClick={saveBuyer}>Salvar</button>
+          </div>
+        </Modal>
+      )}
+
+      {confirm && <ConfirmModal message="Excluir este comprador? Os pagamentos antigos continuarão registrados, mas ficarão sem comprador cadastrado." onConfirm={() => doDelete(confirm)} onCancel={() => setConfirm(null)} />}
+    </div>
+  );
+};
+
 // ─── PAYMENTS SCREEN ──────────────────────────────────────────────────────────
 const PaymentsScreen = ({ data, setData, currentUser, addLog }) => {
   const [search, setSearch] = useState("");
   const [filterForn, setFilterForn] = useState("");
+  const [filterComp, setFilterComp] = useState("");
   const [filterForma, setFilterForma] = useState("");
-  const [payModal, setPayModal] = useState(false);
-  const [payForm, setPayForm] = useState({ data_pagamento: new Date().toISOString().slice(0, 10), forma_pagamento: "PIX", tipo_anexo: "Comprovante" });
-
-  const enviarPagamentoFornecedor = async () => {
-    if (!payForm.valor) return alert("Informe o valor do pagamento.");
-    if (!payForm.anexo_file && !payForm.anexo_nome) return alert("Anexe o comprovante ou a nota de bonificação.");
-    const next = { ...data, pagamentos: [...data.pagamentos], anexos: [...(data.anexos || [])] };
-    const id = next.nextId.pagamentos++;
-    const anexoNome = payForm.anexo_file?.name || payForm.anexo_nome || "";
-    const arquivoData = await fileToDataUrl(payForm.anexo_file);
-    const novo = {
-      id,
-      fornecedor_id: currentUser.fornecedor_id,
-      valor: Number(payForm.valor),
-      forma_pagamento: payForm.forma_pagamento || "PIX",
-      numero_nfe: payForm.numero_nfe || "",
-      observacao: payForm.observacao || "Enviado pelo fornecedor para validação do administrador",
-      data_pagamento: payForm.data_pagamento || new Date().toISOString().slice(0, 10),
-      anexo_nome: anexoNome,
-      tipo_anexo: payForm.tipo_anexo || (payForm.forma_pagamento === "Bonificação" ? "Nota de bonificação" : "Comprovante"),
-      anexo_data: arquivoData.data_url,
-      anexo_mime: arquivoData.mime,
-      enviado_por: "Fornecedor",
-      confirmado: false,
-      status_confirmacao: "Aguardando confirmação",
-      created_at: new Date().toISOString()
-    };
-    next.pagamentos.push(novo);
-    next.anexos.push({ id: next.nextId.anexos++, pagamento_id: id, nome_arquivo: anexoNome, tipo_arquivo: novo.tipo_anexo, data_url: arquivoData.data_url, mime: arquivoData.mime, created_at: new Date().toISOString() });
-    next.logs = [...(next.logs || []), { id: next.nextId.logs++, usuario_id: currentUser.id, acao: "Envio", descricao: "Fornecedor enviou comprovante/nota para confirmação", ip: "127.0.0.1", created_at: new Date().toISOString() }];
-    setData(next);
-    setPayModal(false);
-    setPayForm({ data_pagamento: new Date().toISOString().slice(0, 10), forma_pagamento: "PIX", tipo_anexo: "Comprovante" });
-    alert("Enviado para validação do administrador.");
-  };
-
+  const [inicio, setInicio] = useState("");
+  const [fim, setFim] = useState("");
   const [modal, setModal] = useState(false);
   const [form, setForm] = useState({ data_pagamento: new Date().toISOString().slice(0, 10), forma_pagamento: "PIX" });
   const [confirm, setConfirm] = useState(null);
+  const [sort, setSort] = useState({ key: "data_pagamento", dir: -1 });
   const canDelete = currentUser.tipo === "Administrador";
 
+  const ordenar = (key) => setSort(prev => ({ key, dir: prev.key === key ? prev.dir * -1 : 1 }));
   const statusPagamento = (p) => p.status_confirmacao || (p.confirmado === false ? "Aguardando confirmação" : "Confirmado");
-
-  const filtered = data.pagamentos.filter(p => {
-    const forn = data.fornecedores.find(f => f.id === p.fornecedor_id);
-    const matchSearch = !search || p.numero_nfe?.includes(search) || forn?.razao_social?.toLowerCase().includes(search.toLowerCase()) || p.anexo_nome?.toLowerCase().includes(search.toLowerCase());
-    const matchForn = !filterForn || p.fornecedor_id === Number(filterForn);
-    const matchForma = !filterForma || p.forma_pagamento === filterForma;
-    return matchSearch && matchForn && matchForma;
-  }).sort((a, b) => b.id - a.id);
-
-  const aplicarSaldo = (next, pagamento) => {
-    const fIdx = next.fornecedores.findIndex(f => f.id === Number(pagamento.fornecedor_id));
-    if (fIdx !== -1) {
-      const valor = Number(pagamento.valor);
-      if (pagamento.forma_pagamento === "Bonificação") {
-        next.fornecedores[fIdx].saldo_bonificado += valor;
-        next.fornecedores[fIdx].saldo_devido = Math.max(0, next.fornecedores[fIdx].saldo_devido - valor);
-      } else {
-        next.fornecedores[fIdx].saldo_pago += valor;
-        next.fornecedores[fIdx].saldo_devido = Math.max(0, next.fornecedores[fIdx].saldo_devido - valor);
-      }
-    }
+  const compradorNome = (id) => data.compradores?.find(c => Number(c.id) === Number(id))?.nome || "Sem comprador";
+  const fornecedorNome = (id) => {
+    const f = data.fornecedores.find(x => Number(x.id) === Number(id));
+    return f?.nome_fantasia || f?.razao_social || "-";
   };
 
+  const filtered = data.pagamentos.filter(p => {
+    const forn = fornecedorNome(p.fornecedor_id);
+    const comp = compradorNome(p.comprador_id);
+    const d = p.data_pagamento || "";
+    const matchSearch = !search || [p.numero_nfe, p.anexo_nome, forn, comp].join(" ").toLowerCase().includes(search.toLowerCase());
+    const matchForn = !filterForn || Number(p.fornecedor_id) === Number(filterForn);
+    const matchComp = !filterComp || Number(p.comprador_id) === Number(filterComp);
+    const matchForma = !filterForma || p.forma_pagamento === filterForma;
+    const matchData = (!inicio || d >= inicio) && (!fim || d <= fim);
+    return matchSearch && matchForn && matchComp && matchForma && matchData;
+  }).sort((a, b) => {
+    const key = sort.key;
+    let av = key === "fornecedor" ? fornecedorNome(a.fornecedor_id) : key === "comprador" ? compradorNome(a.comprador_id) : a[key];
+    let bv = key === "fornecedor" ? fornecedorNome(b.fornecedor_id) : key === "comprador" ? compradorNome(b.comprador_id) : b[key];
+    if (key === "valor_devido" || key === "valor_pago" || key === "valor") return (Number(av || 0) - Number(bv || 0)) * sort.dir;
+    return String(av || "").localeCompare(String(bv || "")) * sort.dir;
+  });
+
   const savePayment = async () => {
-    if (!form.fornecedor_id || !form.valor) return alert("Fornecedor e valor são obrigatórios.");
-    const next = { ...data, pagamentos: [...data.pagamentos], fornecedores: data.fornecedores.map(f => ({ ...f })), anexos: [...(data.anexos || [])] };
+    if (!form.fornecedor_id || !form.comprador_id) return alert("Fornecedor e comprador são obrigatórios.");
+    if (!form.valor_devido && !form.valor_pago && !form.valor) return alert("Informe valor devido ou valor pago.");
+    const next = { ...data, pagamentos: [...data.pagamentos], anexos: [...(data.anexos || [])] };
     const id = next.nextId.pagamentos++;
-    const valor = Number(form.valor);
+    const valorDevido = Number(form.valor_devido || 0);
+    const valorPago = Number(form.valor_pago || form.valor || 0);
     const anexoNome = form.anexo_file?.name || form.anexo_nome || "";
     const arquivoData = await fileToDataUrl(form.anexo_file);
     const novo = {
       ...form,
       id,
       fornecedor_id: Number(form.fornecedor_id),
-      valor,
+      comprador_id: Number(form.comprador_id),
+      valor_devido: valorDevido,
+      valor_pago: valorPago,
+      valor: valorPago,
       anexo_nome: anexoNome,
       tipo_anexo: form.tipo_anexo || (form.forma_pagamento === "Bonificação" ? "Nota de bonificação" : "Comprovante"),
       anexo_data: arquivoData.data_url,
@@ -806,72 +1043,85 @@ const PaymentsScreen = ({ data, setData, currentUser, addLog }) => {
     if (anexoNome) {
       next.anexos.push({ id: next.nextId.anexos++, pagamento_id: id, nome_arquivo: anexoNome, tipo_arquivo: novo.tipo_anexo, data_url: arquivoData.data_url, mime: arquivoData.mime, created_at: new Date().toISOString() });
     }
-    aplicarSaldo(next, novo);
-    const fIdx = next.fornecedores.findIndex(f => f.id === Number(form.fornecedor_id));
-    addLog(`Pagamento de ${fmt(valor)} registrado para ${next.fornecedores[fIdx]?.razao_social}`);
+    addLog(`Pagamento/dívida de ${fmt(valorPago)} registrado para ${fornecedorNome(novo.fornecedor_id)} / ${compradorNome(novo.comprador_id)}`);
     setData(next);
     setModal(false);
     setForm({ data_pagamento: new Date().toISOString().slice(0, 10), forma_pagamento: "PIX" });
   };
 
   const confirmarPagamento = (id) => {
-    const pagamento = data.pagamentos.find(p => p.id === id);
-    if (!pagamento) return;
-    const next = { ...data, pagamentos: data.pagamentos.map(p => ({ ...p })), fornecedores: data.fornecedores.map(f => ({ ...f })) };
-    const idx = next.pagamentos.findIndex(p => p.id === id);
-    next.pagamentos[idx] = { ...next.pagamentos[idx], confirmado: true, status_confirmacao: "Confirmado", confirmado_por: currentUser.nome, confirmado_em: new Date().toISOString() };
-    aplicarSaldo(next, next.pagamentos[idx]);
-    addLog(`Pagamento ${pagamento.numero_nfe || "#" + pagamento.id} confirmado pelo administrador`);
+    const next = { ...data, pagamentos: data.pagamentos.map(p => Number(p.id) === Number(id) ? { ...p, confirmado: true, status_confirmacao: "Confirmado", confirmado_por: currentUser.nome, confirmado_em: new Date().toISOString() } : p) };
     setData(next);
+    addLog(`Pagamento #${id} confirmado pelo administrador`);
   };
 
   const doDelete = (id) => {
-    const pag = data.pagamentos.find(p => p.id === id);
-    const next = { ...data, pagamentos: [...data.pagamentos], fornecedores: data.fornecedores.map(f => ({ ...f })), anexos: [...(data.anexos || [])] };
-    const fIdx = next.fornecedores.findIndex(f => f.id === pag.fornecedor_id);
-    if (fIdx !== -1 && pag.confirmado !== false && statusPagamento(pag) === "Confirmado") {
-      if (pag.forma_pagamento === "Bonificação") next.fornecedores[fIdx].saldo_bonificado -= pag.valor;
-      else next.fornecedores[fIdx].saldo_pago -= pag.valor;
-      next.fornecedores[fIdx].saldo_devido += pag.valor;
-    }
-    next.pagamentos = next.pagamentos.filter(p => p.id !== id);
-    next.anexos = next.anexos.filter(a => a.pagamento_id !== id);
-    addLog(`Pagamento ${pag.numero_nfe || "#" + pag.id} excluído`);
+    const pag = data.pagamentos.find(p => Number(p.id) === Number(id));
+    const next = { ...data, pagamentos: data.pagamentos.filter(p => Number(p.id) !== Number(id)), anexos: (data.anexos || []).filter(a => Number(a.pagamento_id) !== Number(id)) };
+    addLog(`Pagamento ${pag?.numero_nfe || "#" + id} excluído`);
     setData(next);
     setConfirm(null);
   };
 
+  const totais = filtered.filter(p => p.confirmado !== false).reduce((acc, p) => {
+    acc.devido += Number(p.valor_devido || 0);
+    acc.pago += Number(p.valor_pago ?? p.valor ?? 0);
+    return acc;
+  }, { devido: 0, pago: 0 });
+
   return (
     <div>
-      <h1 style={S.pageTitle}>Pagamentos</h1>
-      <p style={S.pageSub}>Registrar, anexar comprovantes/notas e confirmar pagamentos enviados pelo fornecedor</p>
-      <div style={S.searchBar}>
-        <input style={{ ...S.input, flex: 1 }} placeholder="Buscar por NF-e, fornecedor ou anexo..." value={search} onChange={e => setSearch(e.target.value)} />
-        <select style={{ ...S.select, width: 200 }} value={filterForn} onChange={e => setFilterForn(e.target.value)}>
+      <h1 style={S.pageTitle}>Pagamentos e Dívidas</h1>
+      <p style={S.pageSub}>Registrar a dívida/pagamento vinculado ao comprador responsável</p>
+
+      <div style={S.grid(3)}>
+        <MetricCard label="Total Devido Filtrado" value={fmt(totais.devido)} color={COLORS.danger} />
+        <MetricCard label="Total Pago Filtrado" value={fmt(totais.pago)} color={COLORS.success} />
+        <MetricCard label="Saldo Filtrado" value={fmt(totais.pago - totais.devido)} color={totais.pago - totais.devido >= 0 ? COLORS.success : COLORS.danger} />
+      </div>
+
+      <div style={{ ...S.searchBar, marginTop: 16 }}>
+        <input style={{ ...S.input, flex: 1 }} placeholder="Buscar por NF-e, fornecedor, comprador ou anexo..." value={search} onChange={e => setSearch(e.target.value)} />
+        <select style={{ ...S.select, width: 190 }} value={filterForn} onChange={e => setFilterForn(e.target.value)}>
           <option value="">Todos fornecedores</option>
           {data.fornecedores.map(f => <option key={f.id} value={f.id}>{f.nome_fantasia || f.razao_social}</option>)}
         </select>
-        <select style={{ ...S.select, width: 180 }} value={filterForma} onChange={e => setFilterForma(e.target.value)}>
+        <select style={{ ...S.select, width: 190 }} value={filterComp} onChange={e => setFilterComp(e.target.value)}>
+          <option value="">Todos compradores</option>
+          {(data.compradores || []).map(c => <option key={c.id} value={c.id}>{c.nome}</option>)}
+        </select>
+        <select style={{ ...S.select, width: 170 }} value={filterForma} onChange={e => setFilterForma(e.target.value)}>
           <option value="">Todas as formas</option>
           {PAYMENT_METHODS.map(m => <option key={m} value={m}>{m}</option>)}
         </select>
-        <button style={S.btn("primary")} onClick={() => setModal(true)}><Icon name="plus" size={15} color="#fff" /> Novo Pagamento</button>
+        <input style={{ ...S.input, width: 145 }} type="date" value={inicio} onChange={e => setInicio(e.target.value)} />
+        <input style={{ ...S.input, width: 145 }} type="date" value={fim} onChange={e => setFim(e.target.value)} />
+        <button style={S.btn("primary")} onClick={() => setModal(true)}><Icon name="plus" size={15} color="#fff" /> Novo Lançamento</button>
       </div>
+
       <div style={S.card}>
         <table style={S.table}>
           <thead>
-            <tr>{["#", "Fornecedor", "Valor", "Forma", "Anexo", "Status", "NF-e", "Data", "Ações"].map(h => <th key={h} style={S.th}>{h}</th>)}</tr>
+            <tr>
+              {[
+                ["id", "#"], ["fornecedor", "Fornecedor"], ["comprador", "Comprador"], ["valor_devido", "Valor Devido"], ["valor_pago", "Valor Pago"], ["forma_pagamento", "Forma"], ["anexo_nome", "Anexo"], ["status_confirmacao", "Status"], ["numero_nfe", "NF-e"], ["data_pagamento", "Data"]
+              ].map(([key, label]) => <th key={key} style={{ ...S.th, cursor: "pointer" }} onClick={() => ordenar(key)}>{label} {sort.key === key ? (sort.dir === 1 ? "▲" : "▼") : ""}</th>)}
+              <th style={S.th}>Ações</th>
+            </tr>
           </thead>
           <tbody>
-            {filtered.length === 0 && <tr><td colSpan={9} style={{ ...S.td, textAlign: "center", color: COLORS.textMuted, padding: 32 }}>Nenhum pagamento encontrado</td></tr>}
+            {filtered.length === 0 && <tr><td colSpan={11} style={{ ...S.td, textAlign: "center", color: COLORS.textMuted, padding: 32 }}>Nenhum lançamento encontrado</td></tr>}
             {filtered.map(p => {
-              const forn = data.fornecedores.find(f => f.id === p.fornecedor_id);
               const st = statusPagamento(p);
+              const devido = Number(p.valor_devido || 0);
+              const pago = Number(p.valor_pago ?? p.valor ?? 0);
               return (
                 <tr key={p.id}>
                   <td style={{ ...S.td, color: COLORS.textMuted, fontFamily: "monospace" }}>#{p.id}</td>
-                  <td style={S.td}>{forn?.nome_fantasia || forn?.razao_social || "-"}</td>
-                  <td style={{ ...S.td, fontWeight: 700, color: p.forma_pagamento === "Bonificação" ? COLORS.warning : COLORS.success }}>{fmt(p.valor)}</td>
+                  <td style={S.td}>{fornecedorNome(p.fornecedor_id)}</td>
+                  <td style={S.td}>{compradorNome(p.comprador_id)}</td>
+                  <td style={{ ...S.td, fontWeight: 700, color: COLORS.danger }}>{fmt(devido)}</td>
+                  <td style={{ ...S.td, fontWeight: 700, color: COLORS.success }}>{fmt(pago)}</td>
                   <td style={S.td}><StatusBadge status={p.forma_pagamento === "Bonificação" ? "Bonificado" : "Pago"} /></td>
                   <td style={S.td}>{p.anexo_nome ? <span style={{ fontSize: 12 }}>📎 {p.tipo_anexo}: {p.anexo_nome}</span> : "-"}</td>
                   <td style={S.td}><StatusBadge status={st} /></td>
@@ -882,7 +1132,7 @@ const PaymentsScreen = ({ data, setData, currentUser, addLog }) => {
                       {currentUser.tipo === "Administrador" && st === "Aguardando confirmação" && (
                         <button style={{ ...S.btn("success", "sm"), padding: "4px 7px" }} onClick={() => confirmarPagamento(p.id)}>Confirmar</button>
                       )}
-                      {p.anexo_nome && <button style={{ ...S.btn("outline", "sm"), padding: "4px 7px" }} onClick={() => downloadArquivo(data.anexos.find(a => a.pagamento_id === p.id), p)} title="Baixar anexo"><Icon name="download" size={12} /></button>}
+                      {p.anexo_nome && <button style={{ ...S.btn("outline", "sm"), padding: "4px 7px" }} onClick={() => downloadArquivo(data.anexos.find(a => Number(a.pagamento_id) === Number(p.id)), p)} title="Baixar anexo"><Icon name="download" size={12} /></button>}
                       {canDelete && <button style={{ ...S.btn("danger", "sm"), padding: "4px 7px" }} onClick={() => setConfirm(p.id)}><Icon name="trash" size={12} color="#fff" /></button>}
                     </div>
                   </td>
@@ -894,24 +1144,40 @@ const PaymentsScreen = ({ data, setData, currentUser, addLog }) => {
       </div>
 
       {modal && (
-        <Modal title="Registrar Pagamento" onClose={() => setModal(false)}>
-          <div style={S.formRow}>
-            <label style={S.label}>Fornecedor *</label>
-            <select style={S.select} value={form.fornecedor_id || ""} onChange={e => setForm(p => ({ ...p, fornecedor_id: e.target.value }))}>
-              <option value="">Selecione...</option>
-              {data.fornecedores.map(f => <option key={f.id} value={f.id}>{f.nome_fantasia || f.razao_social}</option>)}
-            </select>
-          </div>
+        <Modal title="Registrar Dívida / Pagamento" onClose={() => setModal(false)} wide>
           <div style={S.grid(2)}>
             <div style={S.formRow}>
-              <label style={S.label}>Valor (R$) *</label>
-              <input style={S.input} type="number" value={form.valor || ""} onChange={e => setForm(p => ({ ...p, valor: e.target.value }))} />
+              <label style={S.label}>Fornecedor *</label>
+              <select style={S.select} value={form.fornecedor_id || ""} onChange={e => setForm(p => ({ ...p, fornecedor_id: e.target.value }))}>
+                <option value="">Selecione...</option>
+                {data.fornecedores.map(f => <option key={f.id} value={f.id}>{f.nome_fantasia || f.razao_social}</option>)}
+              </select>
             </div>
             <div style={S.formRow}>
-              <label style={S.label}>Data do Pagamento</label>
+              <label style={S.label}>Comprador responsável pela dívida *</label>
+              <select style={S.select} value={form.comprador_id || ""} onChange={e => setForm(p => ({ ...p, comprador_id: e.target.value }))}>
+                <option value="">Selecione...</option>
+                {(data.compradores || []).filter(c => c.ativo !== false && c.status_cadastro !== "Rejeitado").map(c => <option key={c.id} value={c.id}>{c.nome}</option>)}
+              </select>
+              <p style={{ fontSize: 11, color: COLORS.textMuted, margin: "4px 0 0" }}>O fornecedor não fica preso a um comprador; cada dívida/pagamento recebe o comprador correto.</p>
+            </div>
+          </div>
+
+          <div style={S.grid(3)}>
+            <div style={S.formRow}>
+              <label style={S.label}>Valor devido (R$)</label>
+              <input style={S.input} type="number" value={form.valor_devido || ""} onChange={e => setForm(p => ({ ...p, valor_devido: e.target.value }))} />
+            </div>
+            <div style={S.formRow}>
+              <label style={S.label}>Valor pago (R$)</label>
+              <input style={S.input} type="number" value={form.valor_pago || ""} onChange={e => setForm(p => ({ ...p, valor_pago: e.target.value, valor: e.target.value }))} />
+            </div>
+            <div style={S.formRow}>
+              <label style={S.label}>Data</label>
               <input style={S.input} type="date" value={form.data_pagamento || ""} onChange={e => setForm(p => ({ ...p, data_pagamento: e.target.value }))} />
             </div>
           </div>
+
           <div style={S.grid(2)}>
             <div style={S.formRow}>
               <label style={S.label}>Forma de Pagamento</label>
@@ -925,6 +1191,7 @@ const PaymentsScreen = ({ data, setData, currentUser, addLog }) => {
               <input style={S.input} value={form.numero_nfe || ""} onChange={e => setForm(p => ({ ...p, numero_nfe: e.target.value }))} placeholder="NF-000" />
             </div>
           </div>
+
           <div style={S.grid(2)}>
             <div style={S.formRow}>
               <label style={S.label}>Tipo de anexo</label>
@@ -934,6 +1201,7 @@ const PaymentsScreen = ({ data, setData, currentUser, addLog }) => {
                 <option value="Nota de bonificação">Nota de bonificação</option>
                 <option value="NF-e">NF-e</option>
                 <option value="JPG / Imagem">JPG / Imagem</option>
+                <option value="XML">XML</option>
               </select>
             </div>
             <div style={S.formRow}>
@@ -941,22 +1209,23 @@ const PaymentsScreen = ({ data, setData, currentUser, addLog }) => {
               <input style={S.input} type="file" accept=".pdf,.jpg,.jpeg,.png,.xml" onChange={e => setForm(p => ({ ...p, anexo_file: e.target.files?.[0], anexo_nome: e.target.files?.[0]?.name || "" }))} />
             </div>
           </div>
+
           <div style={S.formRow}>
             <label style={S.label}>Observação</label>
             <textarea style={{ ...S.input, minHeight: 60, resize: "vertical" }} value={form.observacao || ""} onChange={e => setForm(p => ({ ...p, observacao: e.target.value }))} />
           </div>
           <div style={{ display: "flex", gap: 10, justifyContent: "flex-end" }}>
             <button style={S.btn("outline")} onClick={() => setModal(false)}>Cancelar</button>
-            <button style={S.btn("primary")} onClick={savePayment}>Registrar e confirmar pagamento</button>
+            <button style={S.btn("primary")} onClick={savePayment}>Registrar lançamento</button>
           </div>
         </Modal>
       )}
-      {confirm && <ConfirmModal message="Excluir este pagamento? O saldo do fornecedor será revertido somente se ele já estiver confirmado." onConfirm={() => doDelete(confirm)} onCancel={() => setConfirm(null)} />}
+      {confirm && <ConfirmModal message="Excluir este lançamento? O dashboard e a carteira do comprador serão atualizados automaticamente." onConfirm={() => doDelete(confirm)} onCancel={() => setConfirm(null)} />}
     </div>
   );
 };
 
-// ─── FINANCIAL CONTROL SCREEN ─────────────────────────────────────────────────
+// ─── FINANCIAL CONTROL SCREEN// ─── FINANCIAL CONTROL SCREEN// ─── FINANCIAL CONTROL SCREEN ─────────────────────────────────────────────────
 const FinancialScreen = ({ data, setData, currentUser, addLog }) => {
   const [modal, setModal] = useState(null);
   const [form, setForm] = useState({});
@@ -1257,8 +1526,9 @@ const UsersScreen = ({ data, setData, currentUser, addLog }) => {
   const [modal, setModal] = useState(null);
   const [form, setForm] = useState({});
   const [confirm, setConfirm] = useState(null);
+  const [showPasswords, setShowPasswords] = useState({});
 
-  const openNew = () => { setForm({ tipo: "Operador", ativo: true }); setModal("new"); };
+  const openNew = () => { setForm({ tipo: "Operador", ativo: false, status_cadastro: "Em análise" }); setModal("new"); };
   const openEdit = (u) => { setForm({ ...u }); setModal("edit"); };
 
   const saveUser = () => {
@@ -1266,7 +1536,7 @@ const UsersScreen = ({ data, setData, currentUser, addLog }) => {
     const next = { ...data };
     if (modal === "new") {
       const id = next.nextId.users++;
-      next.users.push({ ...form, id, created_at: new Date().toISOString().slice(0, 10), fornecedor_id: form.fornecedor_id ? Number(form.fornecedor_id) : null });
+      next.users.push({ ...form, id, ativo: false, status_cadastro: "Em análise", created_at: new Date().toISOString().slice(0, 10), fornecedor_id: form.fornecedor_id ? Number(form.fornecedor_id) : null });
       addLog(`Usuário ${form.nome} cadastrado`);
     } else {
       next.users = next.users.map(u => u.id === form.id ? { ...form, fornecedor_id: form.fornecedor_id ? Number(form.fornecedor_id) : null, ativo: form.tipo === "Fornecedor" && form.fornecedor_id ? true : form.ativo, status_cadastro: form.tipo === "Fornecedor" && form.fornecedor_id ? "Ativo" : (form.status_cadastro || (form.ativo ? "Ativo" : "Em análise")) } : u);
@@ -1302,7 +1572,7 @@ const UsersScreen = ({ data, setData, currentUser, addLog }) => {
       <div style={S.card}>
         <table style={S.table}>
           <thead>
-            <tr>{["Usuário", "E-mail", "Tipo", "Fornecedor Vinculado", "Solicitação", "Status", "Cadastro", "Ações"].map(h => <th key={h} style={S.th}>{h}</th>)}</tr>
+            <tr>{["Usuário", "E-mail", "Senha", "Tipo", "Fornecedor Vinculado", "Solicitação", "Status", "Cadastro", "Ações"].map(h => <th key={h} style={S.th}>{h}</th>)}</tr>
           </thead>
           <tbody>
             {data.users.map(u => {
@@ -1316,6 +1586,14 @@ const UsersScreen = ({ data, setData, currentUser, addLog }) => {
                     </div>
                   </td>
                   <td style={{ ...S.td, fontSize: 12 }}>{u.email}</td>
+                  <td style={S.td}>
+                    <div style={{ display: "flex", gap: 6, alignItems: "center" }}>
+                      <span style={{ fontFamily: "monospace", fontSize: 12 }}>{showPasswords[u.id] ? (u.senha || "-") : "••••••"}</span>
+                      <button style={{ ...S.btn("outline", "sm"), padding: "3px 6px" }} onClick={() => setShowPasswords(p => ({ ...p, [u.id]: !p[u.id] }))}>
+                        <Icon name="eye" size={12} />
+                      </button>
+                    </div>
+                  </td>
                   <td style={S.td}><StatusBadge status={u.tipo} /></td>
                   <td style={S.td}>{forn ? <span style={{ fontSize: 12 }}>{forn.nome_fantasia || forn.razao_social}</span> : <span style={{ color: COLORS.textMuted, fontSize: 12 }}>—</span>}</td>
                   <td style={S.td}>{u.fornecedor_pendente?.razao_social ? <span style={{ fontSize: 12 }}>{u.fornecedor_pendente.razao_social}<br />{u.fornecedor_pendente.cnpj || ""}</span> : <span style={{ color: COLORS.textMuted, fontSize: 12 }}>—</span>}</td>
@@ -1679,6 +1957,7 @@ const adminNav = [
   { key: "dashboard", label: "Dashboard", icon: "dashboard" },
   { section: "Cadastros" },
   { key: "suppliers", label: "Fornecedores", icon: "suppliers" },
+  { key: "buyers", label: "Compradores", icon: "users" },
   { key: "financial", label: "Controle Financeiro", icon: "payments" },
   { key: "payments", label: "Pagamentos", icon: "payments" },
   { section: "Documentos & Relatórios" },
@@ -1694,6 +1973,7 @@ const operatorNav = [
   { key: "dashboard", label: "Dashboard", icon: "dashboard" },
   { section: "Consultas" },
   { key: "suppliers", label: "Fornecedores", icon: "suppliers" },
+  { key: "buyers", label: "Compradores", icon: "users" },
   { key: "financial", label: "Controle Financeiro", icon: "payments" },
   { key: "payments", label: "Pagamentos", icon: "payments" },
   { key: "documents", label: "Documentos", icon: "docs" },
@@ -1709,8 +1989,17 @@ export default function App() {
   const [toast, setToast] = useState(null);
 
   const setData = useCallback((next) => {
-    setDataState(next);
-    localStorage.setItem("saas_data", JSON.stringify(next));
+    const normalized = typeof next === "function" ? normalizeData(next(data)) : normalizeData(next);
+    setDataState(normalized);
+    localStorage.setItem("saas_data", JSON.stringify(normalized));
+  }, [data]);
+
+  useEffect(() => {
+    const onStorage = (e) => {
+      if (e.key === "saas_data" && e.newValue) setDataState(normalizeData(JSON.parse(e.newValue)));
+    };
+    window.addEventListener("storage", onStorage);
+    return () => window.removeEventListener("storage", onStorage);
   }, []);
 
   const showToast = (msg, type = "success") => {
@@ -1766,6 +2055,7 @@ export default function App() {
     switch (page) {
       case "dashboard": return <Dashboard {...props} />;
       case "suppliers": return <SuppliersScreen {...props} />;
+      case "buyers": return <BuyersScreen {...props} />;
       case "financial": return <FinancialScreen {...props} />;
       case "payments": return <PaymentsScreen {...props} />;
       case "documents": return <DocumentsScreen {...props} />;
