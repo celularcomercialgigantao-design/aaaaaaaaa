@@ -532,14 +532,15 @@ const LoginScreen = ({ onLogin, portalMode, data, setData, onBackHome }) => {
 const Dashboard = ({ data, currentUser }) => {
   const [inicio, setInicio] = useState("");
   const [fim, setFim] = useState("");
+  const [compradorFiltro, setCompradorFiltro] = useState("");
   const inPeriod = (p) => {
     const d = p.data_pagamento || p.created_at?.slice(0, 10) || "";
     return (!inicio || d >= inicio) && (!fim || d <= fim);
   };
-  const pagamentosPeriodo = (data.pagamentos || []).filter(inPeriod).filter(p => p.confirmado !== false);
+  const pagamentosPeriodo = (data.pagamentos || []).filter(inPeriod).filter(p => p.confirmado !== false).filter(p => !compradorFiltro || Number(p.comprador_id) === Number(compradorFiltro));
   const totalDevido = pagamentosPeriodo.reduce((s, p) => s + Number(p.valor_devido || 0), 0);
   const totalPago = pagamentosPeriodo.reduce((s, p) => s + Number(p.valor_pago ?? p.valor ?? 0), 0);
-  const saldoTotalPositivo = pagamentosPeriodo.reduce((s, p) => s + Math.max(0, Number(p.valor_pago ?? p.valor ?? 0) - Number(p.valor_devido || 0)), 0);
+  const saldoTotalCarteira = totalPago - totalDevido;
 
   const porComprador = (data.compradores || []).map(c => {
     const itens = pagamentosPeriodo.filter(p => Number(p.comprador_id) === Number(c.id));
@@ -567,14 +568,21 @@ const Dashboard = ({ data, currentUser }) => {
             <label style={S.label}>Data final</label>
             <input style={S.input} type="date" value={fim} onChange={e => setFim(e.target.value)} />
           </div>
-          <button style={S.btn("outline")} onClick={() => { setInicio(""); setFim(""); }}>Limpar filtro</button>
+          <div style={S.formRow}>
+            <label style={S.label}>Comprador</label>
+            <select style={S.select} value={compradorFiltro} onChange={e => setCompradorFiltro(e.target.value)}>
+              <option value="">Todos compradores</option>
+              {(data.compradores || []).map(c => <option key={c.id} value={c.id}>{c.nome}</option>)}
+            </select>
+          </div>
+          <button style={S.btn("outline")} onClick={() => { setInicio(""); setFim(""); setCompradorFiltro(""); }}>Limpar filtro</button>
         </div>
       </div>
 
       <div style={S.grid(3)}>
         <MetricCard label="Valor Total Geral Devido" value={fmt(totalDevido)} icon="payments" color={COLORS.danger} sub={`${pagamentosPeriodo.length} lançamentos`} />
         <MetricCard label="Valor Total Pago" value={fmt(totalPago)} icon="check" color={COLORS.success} sub="Pagamentos confirmados" />
-        <MetricCard label="Saldo Total Positivo" value={fmt(saldoTotalPositivo)} icon="info" color={COLORS.warning} sub="Pago acima do devido" />
+        <MetricCard label="Saldo Total Carteira" value={fmt(saldoTotalCarteira)} icon="info" color={saldoTotalCarteira >= 0 ? COLORS.success : COLORS.danger} sub="Total pago menos total devido" />
       </div>
 
       <div style={{ ...S.grid(2), marginTop: 16 }}>
@@ -685,6 +693,12 @@ const SuppliersScreen = ({ data, setData, currentUser, addLog }) => {
     addLog("Fornecedor rejeitado pelo administrador");
   };
 
+  const inativarFornecedor = (id) => {
+    const next = { ...data, fornecedores: data.fornecedores.map(f => Number(f.id) === Number(id) ? { ...f, ativo: false, status_cadastro: "Inativo" } : f) };
+    setData(next);
+    addLog("Fornecedor inativado pelo administrador");
+  };
+
   const doDelete = (id) => {
     const forn = data.fornecedores.find(f => f.id === id);
     const next = { ...data };
@@ -695,8 +709,8 @@ const SuppliersScreen = ({ data, setData, currentUser, addLog }) => {
     setConfirm(null);
   };
 
-  const F = ({ label, field, type = "text", opts }) => (
-    <div style={S.formRow}>
+  const renderField = (label, field, type = "text", opts) => (
+    <div style={S.formRow} key={field}>
       <label style={S.label}>{label}</label>
       {opts ? (
         <select style={S.select} value={form[field] || ""} onChange={e => setForm(p => ({ ...p, [field]: e.target.value }))}>
@@ -744,6 +758,7 @@ const SuppliersScreen = ({ data, setData, currentUser, addLog }) => {
                     <button style={{ ...S.btn("outline", "sm"), padding: "5px 8px" }} onClick={() => openDetail(f)} title="Ver detalhes"><Icon name="eye" size={13} /></button>
                     {canEdit && (f.status_cadastro !== "Ativo") && <button style={{ ...S.btn("success", "sm"), padding: "5px 8px" }} onClick={() => aprovarFornecedor(f.id)} title="Aprovar">Aprovar</button>}
                     {canEdit && (f.status_cadastro !== "Rejeitado") && <button style={{ ...S.btn("warning", "sm"), padding: "5px 8px" }} onClick={() => rejeitarFornecedor(f.id)} title="Rejeitar">Rejeitar</button>}
+                    {canEdit && f.status_cadastro !== "Inativo" && <button style={{ ...S.btn("warning", "sm"), padding: "5px 8px" }} onClick={() => inativarFornecedor(f.id)} title="Inativar">Inativar</button>}
                     {canEdit && <button style={{ ...S.btn("outline", "sm"), padding: "5px 8px" }} onClick={() => openEdit(f)} title="Editar"><Icon name="edit" size={13} /></button>}
                     {canDelete && <button style={{ ...S.btn("danger", "sm"), padding: "5px 8px" }} onClick={() => setConfirm(f.id)} title="Excluir"><Icon name="trash" size={13} color="#fff" /></button>}
                   </div>
@@ -790,18 +805,18 @@ const SuppliersScreen = ({ data, setData, currentUser, addLog }) => {
       {(modal === "new" || modal === "edit") && (
         <Modal title={modal === "new" ? "Novo Fornecedor" : "Editar Fornecedor"} onClose={() => setModal(null)} wide>
           <div style={S.grid(2)}>
-            <F label="Razão Social *" field="razao_social" />
-            <F label="Nome Fantasia" field="nome_fantasia" />
-            <F label="CNPJ *" field="cnpj" />
-            <F label="Inscrição Estadual" field="inscricao_estadual" />
-            <F label="Contato" field="contato" />
-            <F label="Telefone" field="telefone" />
-            <F label="Celular" field="celular" />
-            <F label="E-mail" field="email" type="email" />
-            <div style={{ gridColumn: "span 2" }}><F label="Endereço" field="endereco" /></div>
-            <F label="Cidade" field="cidade" />
-            <F label="Estado" field="estado" opts={ESTADOS} />
-            <F label="CEP" field="cep" />
+            {renderField("Razão Social *", "razao_social")}
+            {renderField("Nome Fantasia", "nome_fantasia")}
+            {renderField("CNPJ *", "cnpj")}
+            {renderField("Inscrição Estadual", "inscricao_estadual")}
+            {renderField("Contato", "contato")}
+            {renderField("Telefone", "telefone")}
+            {renderField("Celular", "celular")}
+            {renderField("E-mail", "email", "email")}
+            <div style={{ gridColumn: "span 2" }}>{renderField("Endereço", "endereco")}</div>
+            {renderField("Cidade", "cidade")}
+            {renderField("Estado", "estado", "text", ESTADOS)}
+            {renderField("CEP", "cep")}
           </div>
           <div style={S.formRow}>
             <label style={S.label}>Observações</label>
@@ -882,6 +897,12 @@ const BuyersScreen = ({ data, setData, currentUser, addLog }) => {
     addLog("Comprador rejeitado pelo administrador");
   };
 
+  const inativarBuyer = (id) => {
+    const next = { ...data, compradores: data.compradores.map(c => Number(c.id) === Number(id) ? { ...c, ativo: false, status_cadastro: "Inativo" } : c) };
+    setData(next);
+    addLog("Comprador inativado pelo administrador");
+  };
+
   const doDelete = (id) => {
     const next = { ...data, compradores: data.compradores.filter(c => Number(c.id) !== Number(id)) };
     setData(next);
@@ -928,6 +949,7 @@ const BuyersScreen = ({ data, setData, currentUser, addLog }) => {
                       <button style={{ ...S.btn("outline", "sm"), padding: "5px 8px" }} onClick={() => openEdit(c)}><Icon name="edit" size={13} /></button>
                       {currentUser.tipo === "Administrador" && c.status_cadastro !== "Ativo" && <button style={{ ...S.btn("success", "sm"), padding: "5px 8px" }} onClick={() => aprovarBuyer(c.id)}>Aprovar</button>}
                       {currentUser.tipo === "Administrador" && c.status_cadastro !== "Rejeitado" && <button style={{ ...S.btn("warning", "sm"), padding: "5px 8px" }} onClick={() => rejeitarBuyer(c.id)}>Rejeitar</button>}
+                      {currentUser.tipo === "Administrador" && c.status_cadastro !== "Inativo" && <button style={{ ...S.btn("warning", "sm"), padding: "5px 8px" }} onClick={() => inativarBuyer(c.id)}>Inativar</button>}
                       {currentUser.tipo === "Administrador" && <button style={{ ...S.btn("danger", "sm"), padding: "5px 8px" }} onClick={() => setConfirm(c.id)}><Icon name="trash" size={13} color="#fff" /></button>}
                     </div>
                   </td>
@@ -955,6 +977,7 @@ const BuyersScreen = ({ data, setData, currentUser, addLog }) => {
                 <option value="Em análise">Em análise</option>
                 <option value="Ativo">Ativo</option>
                 <option value="Rejeitado">Rejeitado</option>
+                <option value="Inativo">Inativo</option>
               </select>
             </div>
           )}
@@ -1539,7 +1562,7 @@ const UsersScreen = ({ data, setData, currentUser, addLog }) => {
       next.users.push({ ...form, id, ativo: false, status_cadastro: "Em análise", created_at: new Date().toISOString().slice(0, 10), fornecedor_id: form.fornecedor_id ? Number(form.fornecedor_id) : null });
       addLog(`Usuário ${form.nome} cadastrado`);
     } else {
-      next.users = next.users.map(u => u.id === form.id ? { ...form, fornecedor_id: form.fornecedor_id ? Number(form.fornecedor_id) : null, ativo: form.tipo === "Fornecedor" && form.fornecedor_id ? true : form.ativo, status_cadastro: form.tipo === "Fornecedor" && form.fornecedor_id ? "Ativo" : (form.status_cadastro || (form.ativo ? "Ativo" : "Em análise")) } : u);
+      next.users = next.users.map(u => u.id === form.id ? { ...form, fornecedor_id: form.fornecedor_id ? Number(form.fornecedor_id) : null, ativo: Boolean(form.ativo), status_cadastro: form.status_cadastro || (form.ativo ? "Ativo" : "Em análise") } : u);
       addLog(`Usuário ${form.nome} atualizado`);
     }
     setData(next);
@@ -1958,7 +1981,6 @@ const adminNav = [
   { section: "Cadastros" },
   { key: "suppliers", label: "Fornecedores", icon: "suppliers" },
   { key: "buyers", label: "Compradores", icon: "users" },
-  { key: "financial", label: "Controle Financeiro", icon: "payments" },
   { key: "payments", label: "Pagamentos", icon: "payments" },
   { section: "Documentos & Relatórios" },
   { key: "documents", label: "Documentos", icon: "docs" },
@@ -1974,7 +1996,6 @@ const operatorNav = [
   { section: "Consultas" },
   { key: "suppliers", label: "Fornecedores", icon: "suppliers" },
   { key: "buyers", label: "Compradores", icon: "users" },
-  { key: "financial", label: "Controle Financeiro", icon: "payments" },
   { key: "payments", label: "Pagamentos", icon: "payments" },
   { key: "documents", label: "Documentos", icon: "docs" },
   { key: "reports", label: "Relatórios", icon: "reports" },
@@ -2056,7 +2077,6 @@ export default function App() {
       case "dashboard": return <Dashboard {...props} />;
       case "suppliers": return <SuppliersScreen {...props} />;
       case "buyers": return <BuyersScreen {...props} />;
-      case "financial": return <FinancialScreen {...props} />;
       case "payments": return <PaymentsScreen {...props} />;
       case "documents": return <DocumentsScreen {...props} />;
       case "reports": return <ReportsScreen {...props} />;
