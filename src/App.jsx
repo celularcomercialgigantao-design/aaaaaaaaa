@@ -28,6 +28,7 @@ const COLORS = {
 };
 
 const PAYMENT_METHODS = ["PIX","Bonificação","Depósito","TED","DOC","Transferência Bancária","Dinheiro"];
+const DEBT_PAYMENT_TYPES = ["À Vista", "Parcelado"];
 const STATUS_OPTIONS = ["Pendente","Pago","Parcial","Bonificado"];
 const USER_TYPES = ["Administrador","Operador","Fornecedor"];
 const ESTADOS = ["AC","AL","AM","AP","BA","CE","DF","ES","GO","MA","MG","MS","MT","PA","PB","PE","PI","PR","RJ","RN","RO","RR","RS","SC","SE","SP","TO"];
@@ -104,7 +105,11 @@ function normalizeData(raw) {
     valor_pago: Number(p.valor_pago ?? p.valor ?? 0),
     valor_devido: Number(p.valor_devido ?? p.valor ?? 0),
     confirmado: p.confirmado === false ? false : true,
-    status_confirmacao: p.status_confirmacao || (p.confirmado === false ? "Aguardando confirmação" : "Confirmado")
+    status_confirmacao: p.status_confirmacao || (p.confirmado === false ? "Aguardando confirmação" : "Confirmado"),
+    tipo_divida: p.tipo_divida || p.tipo_pagamento_divida || "À Vista",
+    parcelas: Number(p.parcelas || 1),
+    data_vencimento: p.data_vencimento || p.data_pagamento || p.created_at?.slice?.(0,10) || "",
+    historico_pagamentos: Array.isArray(p.historico_pagamentos) ? p.historico_pagamentos : []
   }));
   return data;
 }
@@ -1002,44 +1007,57 @@ const PaymentsScreen = ({ data, setData, currentUser, addLog }) => {
   const [inicio, setInicio] = useState("");
   const [fim, setFim] = useState("");
   const [modal, setModal] = useState(false);
-  const [form, setForm] = useState({ data_pagamento: new Date().toISOString().slice(0, 10), forma_pagamento: "PIX" });
+  const [payModal, setPayModal] = useState(null);
+  const [form, setForm] = useState({ data_vencimento: new Date().toISOString().slice(0, 10), tipo_divida: "À Vista", parcelas: 1 });
+  const [payForm, setPayForm] = useState({ data_pagamento: new Date().toISOString().slice(0, 10), forma_pagamento: "PIX", tipo_anexo: "Comprovante" });
   const [confirm, setConfirm] = useState(null);
-  const [sort, setSort] = useState({ key: "data_pagamento", dir: -1 });
+  const [sort, setSort] = useState({ key: "data_vencimento", dir: -1 });
   const canDelete = currentUser.tipo === "Administrador";
 
   const ordenar = (key) => setSort(prev => ({ key, dir: prev.key === key ? prev.dir * -1 : 1 }));
-  const statusPagamento = (p) => p.status_confirmacao || (p.confirmado === false ? "Aguardando confirmação" : "Confirmado");
   const compradorNome = (id) => data.compradores?.find(c => Number(c.id) === Number(id))?.nome || "Sem comprador";
   const fornecedorNome = (id) => {
     const f = data.fornecedores.find(x => Number(x.id) === Number(id));
     return f?.nome_fantasia || f?.razao_social || "-";
   };
+  const valorPagoLancamento = (p) => Number(p.valor_pago ?? p.valor ?? 0);
+  const saldoLancamento = (p) => Number(p.valor_devido || 0) - valorPagoLancamento(p);
+  const statusLancamento = (p) => {
+    if (p.confirmado === false) return "Aguardando confirmação";
+    const devido = Number(p.valor_devido || 0);
+    const pago = valorPagoLancamento(p);
+    if (pago <= 0) return "Pendente";
+    if (devido > 0 && pago >= devido) return "Pago";
+    return "Parcial";
+  };
 
   const filtered = data.pagamentos.filter(p => {
     const forn = fornecedorNome(p.fornecedor_id);
     const comp = compradorNome(p.comprador_id);
-    const d = p.data_pagamento || "";
-    const matchSearch = !search || [p.numero_nfe, p.anexo_nome, forn, comp].join(" ").toLowerCase().includes(search.toLowerCase());
+    const d = p.data_vencimento || p.data_pagamento || "";
+    const matchSearch = !search || [p.numero_nfe, p.anexo_nome, forn, comp, p.observacao].join(" ").toLowerCase().includes(search.toLowerCase());
     const matchForn = !filterForn || Number(p.fornecedor_id) === Number(filterForn);
     const matchComp = !filterComp || Number(p.comprador_id) === Number(filterComp);
-    const matchForma = !filterForma || p.forma_pagamento === filterForma;
+    const matchForma = !filterForma || p.tipo_divida === filterForma || p.forma_pagamento === filterForma;
     const matchData = (!inicio || d >= inicio) && (!fim || d <= fim);
     return matchSearch && matchForn && matchComp && matchForma && matchData;
   }).sort((a, b) => {
     const key = sort.key;
-    let av = key === "fornecedor" ? fornecedorNome(a.fornecedor_id) : key === "comprador" ? compradorNome(a.comprador_id) : a[key];
-    let bv = key === "fornecedor" ? fornecedorNome(b.fornecedor_id) : key === "comprador" ? compradorNome(b.comprador_id) : b[key];
-    if (key === "valor_devido" || key === "valor_pago" || key === "valor") return (Number(av || 0) - Number(bv || 0)) * sort.dir;
+    let av = key === "fornecedor" ? fornecedorNome(a.fornecedor_id) : key === "comprador" ? compradorNome(a.comprador_id) : key === "saldo" ? saldoLancamento(a) : key === "valor_pago" ? valorPagoLancamento(a) : a[key];
+    let bv = key === "fornecedor" ? fornecedorNome(b.fornecedor_id) : key === "comprador" ? compradorNome(b.comprador_id) : key === "saldo" ? saldoLancamento(b) : key === "valor_pago" ? valorPagoLancamento(b) : b[key];
+    if (["valor_devido", "valor_pago", "valor", "saldo", "parcelas"].includes(key)) return (Number(av || 0) - Number(bv || 0)) * sort.dir;
     return String(av || "").localeCompare(String(bv || "")) * sort.dir;
   });
 
-  const savePayment = async () => {
+  const saveDebt = async () => {
     if (!form.fornecedor_id || !form.comprador_id) return alert("Fornecedor e comprador são obrigatórios.");
-    if (!form.valor_devido && !form.valor_pago && !form.valor) return alert("Informe valor devido ou valor pago.");
+    if (!form.valor_devido || Number(form.valor_devido) <= 0) return alert("Informe o valor da dívida.");
+    if (!form.tipo_divida) return alert("Informe se a dívida é à vista ou parcelada.");
+    if (form.tipo_divida === "Parcelado" && (!form.parcelas || Number(form.parcelas) <= 1)) return alert("Informe a quantidade de parcelas.");
+    if (!String(form.observacao || "").trim()) return alert("A observação é obrigatória.");
     const next = { ...data, pagamentos: [...data.pagamentos], anexos: [...(data.anexos || [])] };
     const id = next.nextId.pagamentos++;
     const valorDevido = Number(form.valor_devido || 0);
-    const valorPago = Number(form.valor_pago || form.valor || 0);
     const anexoNome = form.anexo_file?.name || form.anexo_nome || "";
     const arquivoData = await fileToDataUrl(form.anexo_file);
     const novo = {
@@ -1048,15 +1066,21 @@ const PaymentsScreen = ({ data, setData, currentUser, addLog }) => {
       fornecedor_id: Number(form.fornecedor_id),
       comprador_id: Number(form.comprador_id),
       valor_devido: valorDevido,
-      valor_pago: valorPago,
-      valor: valorPago,
+      valor_pago: 0,
+      valor: 0,
+      tipo_divida: form.tipo_divida || "À Vista",
+      parcelas: form.tipo_divida === "Parcelado" ? Number(form.parcelas || 1) : 1,
+      data_vencimento: form.data_vencimento || new Date().toISOString().slice(0, 10),
+      data_pagamento: "",
+      forma_pagamento: "",
       anexo_nome: anexoNome,
-      tipo_anexo: form.tipo_anexo || (form.forma_pagamento === "Bonificação" ? "Nota de bonificação" : "Comprovante"),
+      tipo_anexo: form.tipo_anexo || "NF-e",
       anexo_data: arquivoData.data_url,
       anexo_mime: arquivoData.mime,
+      historico_pagamentos: [],
       enviado_por: currentUser.tipo,
       confirmado: true,
-      status_confirmacao: "Confirmado",
+      status_confirmacao: "Pendente",
       confirmado_por: currentUser.nome,
       confirmado_em: new Date().toISOString(),
       created_at: new Date().toISOString()
@@ -1066,45 +1090,74 @@ const PaymentsScreen = ({ data, setData, currentUser, addLog }) => {
     if (anexoNome) {
       next.anexos.push({ id: next.nextId.anexos++, pagamento_id: id, nome_arquivo: anexoNome, tipo_arquivo: novo.tipo_anexo, data_url: arquivoData.data_url, mime: arquivoData.mime, created_at: new Date().toISOString() });
     }
-    addLog(`Pagamento/dívida de ${fmt(valorPago)} registrado para ${fornecedorNome(novo.fornecedor_id)} / ${compradorNome(novo.comprador_id)}`);
+    addLog(`Dívida de ${fmt(valorDevido)} registrada para ${fornecedorNome(novo.fornecedor_id)} / ${compradorNome(novo.comprador_id)}`);
     setData(next);
     setModal(false);
-    setForm({ data_pagamento: new Date().toISOString().slice(0, 10), forma_pagamento: "PIX" });
+    setForm({ data_vencimento: new Date().toISOString().slice(0, 10), tipo_divida: "À Vista", parcelas: 1 });
   };
 
-  const confirmarPagamento = (id) => {
-    const next = { ...data, pagamentos: data.pagamentos.map(p => Number(p.id) === Number(id) ? { ...p, confirmado: true, status_confirmacao: "Confirmado", confirmado_por: currentUser.nome, confirmado_em: new Date().toISOString() } : p) };
+  const savePaymentOnDebt = async () => {
+    if (!payModal) return;
+    if (!payForm.valor || Number(payForm.valor) <= 0) return alert("Informe o valor pago.");
+    const next = { ...data, pagamentos: [...data.pagamentos], anexos: [...(data.anexos || [])] };
+    const anexoNome = payForm.anexo_file?.name || payForm.anexo_nome || "";
+    const arquivoData = await fileToDataUrl(payForm.anexo_file);
+    next.pagamentos = next.pagamentos.map(p => {
+      if (Number(p.id) !== Number(payModal.id)) return p;
+      const valorAnterior = Number(p.valor_pago ?? p.valor ?? 0);
+      const valorPago = Number(payForm.valor || 0);
+      const historico = Array.isArray(p.historico_pagamentos) ? p.historico_pagamentos : [];
+      return {
+        ...p,
+        valor_pago: valorAnterior + valorPago,
+        valor: valorAnterior + valorPago,
+        forma_pagamento: payForm.forma_pagamento || "PIX",
+        data_pagamento: payForm.data_pagamento || new Date().toISOString().slice(0, 10),
+        numero_nfe: payForm.numero_nfe || p.numero_nfe || "",
+        anexo_nome: anexoNome || p.anexo_nome || "",
+        tipo_anexo: anexoNome ? (payForm.tipo_anexo || "Comprovante") : p.tipo_anexo,
+        anexo_data: arquivoData.data_url || p.anexo_data,
+        anexo_mime: arquivoData.mime || p.anexo_mime,
+        status_confirmacao: (valorAnterior + valorPago) >= Number(p.valor_devido || 0) ? "Pago" : "Parcial",
+        historico_pagamentos: [...historico, { valor: valorPago, data_pagamento: payForm.data_pagamento || new Date().toISOString().slice(0, 10), forma_pagamento: payForm.forma_pagamento || "PIX", observacao: payForm.observacao || "", anexo_nome: anexoNome }]
+      };
+    });
+    if (anexoNome) {
+      next.anexos.push({ id: next.nextId.anexos++, pagamento_id: payModal.id, nome_arquivo: anexoNome, tipo_arquivo: payForm.tipo_anexo || "Comprovante", data_url: arquivoData.data_url, mime: arquivoData.mime, created_at: new Date().toISOString() });
+    }
+    addLog(`Pagamento de ${fmt(Number(payForm.valor))} lançado na dívida #${payModal.id}`);
     setData(next);
-    addLog(`Pagamento #${id} confirmado pelo administrador`);
+    setPayModal(null);
+    setPayForm({ data_pagamento: new Date().toISOString().slice(0, 10), forma_pagamento: "PIX", tipo_anexo: "Comprovante" });
   };
 
   const doDelete = (id) => {
     const pag = data.pagamentos.find(p => Number(p.id) === Number(id));
     const next = { ...data, pagamentos: data.pagamentos.filter(p => Number(p.id) !== Number(id)), anexos: (data.anexos || []).filter(a => Number(a.pagamento_id) !== Number(id)) };
-    addLog(`Pagamento ${pag?.numero_nfe || "#" + id} excluído`);
+    addLog(`Lançamento ${pag?.numero_nfe || "#" + id} excluído`);
     setData(next);
     setConfirm(null);
   };
 
   const totais = filtered.filter(p => p.confirmado !== false).reduce((acc, p) => {
     acc.devido += Number(p.valor_devido || 0);
-    acc.pago += Number(p.valor_pago ?? p.valor ?? 0);
+    acc.pago += valorPagoLancamento(p);
     return acc;
   }, { devido: 0, pago: 0 });
 
   return (
     <div>
       <h1 style={S.pageTitle}>Pagamentos e Dívidas</h1>
-      <p style={S.pageSub}>Registrar a dívida/pagamento vinculado ao comprador responsável</p>
+      <p style={S.pageSub}>Primeiro registre a dívida; depois use o botão Pagar em cada transação.</p>
 
       <div style={S.grid(3)}>
         <MetricCard label="Total Devido Filtrado" value={fmt(totais.devido)} color={COLORS.danger} />
         <MetricCard label="Total Pago Filtrado" value={fmt(totais.pago)} color={COLORS.success} />
-        <MetricCard label="Saldo Filtrado" value={fmt(totais.pago - totais.devido)} color={totais.pago - totais.devido >= 0 ? COLORS.success : COLORS.danger} />
+        <MetricCard label="Saldo Aberto Filtrado" value={fmt(totais.devido - totais.pago)} color={totais.devido - totais.pago <= 0 ? COLORS.success : COLORS.danger} />
       </div>
 
       <div style={{ ...S.searchBar, marginTop: 16 }}>
-        <input style={{ ...S.input, flex: 1 }} placeholder="Buscar por NF-e, fornecedor, comprador ou anexo..." value={search} onChange={e => setSearch(e.target.value)} />
+        <input style={{ ...S.input, flex: 1 }} placeholder="Buscar por NF-e, fornecedor, comprador, observação ou anexo..." value={search} onChange={e => setSearch(e.target.value)} />
         <select style={{ ...S.select, width: 190 }} value={filterForn} onChange={e => setFilterForn(e.target.value)}>
           <option value="">Todos fornecedores</option>
           {data.fornecedores.map(f => <option key={f.id} value={f.id}>{f.nome_fantasia || f.razao_social}</option>)}
@@ -1115,11 +1168,12 @@ const PaymentsScreen = ({ data, setData, currentUser, addLog }) => {
         </select>
         <select style={{ ...S.select, width: 170 }} value={filterForma} onChange={e => setFilterForma(e.target.value)}>
           <option value="">Todas as formas</option>
+          {DEBT_PAYMENT_TYPES.map(m => <option key={m} value={m}>{m}</option>)}
           {PAYMENT_METHODS.map(m => <option key={m} value={m}>{m}</option>)}
         </select>
         <input style={{ ...S.input, width: 145 }} type="date" value={inicio} onChange={e => setInicio(e.target.value)} />
         <input style={{ ...S.input, width: 145 }} type="date" value={fim} onChange={e => setFim(e.target.value)} />
-        <button style={S.btn("primary")} onClick={() => setModal(true)}><Icon name="plus" size={15} color="#fff" /> Novo Lançamento</button>
+        <button style={S.btn("primary")} onClick={() => setModal(true)}><Icon name="plus" size={15} color="#fff" /> Nova Dívida</button>
       </div>
 
       <div style={S.card}>
@@ -1127,17 +1181,18 @@ const PaymentsScreen = ({ data, setData, currentUser, addLog }) => {
           <thead>
             <tr>
               {[
-                ["id", "#"], ["fornecedor", "Fornecedor"], ["comprador", "Comprador"], ["valor_devido", "Valor Devido"], ["valor_pago", "Valor Pago"], ["forma_pagamento", "Forma"], ["anexo_nome", "Anexo"], ["status_confirmacao", "Status"], ["numero_nfe", "NF-e"], ["data_pagamento", "Data"]
+                ["id", "#"], ["fornecedor", "Fornecedor"], ["comprador", "Comprador"], ["valor_devido", "Valor Devido"], ["valor_pago", "Valor Pago"], ["saldo", "Saldo Aberto"], ["tipo_divida", "Tipo"], ["parcelas", "Parcelas"], ["status_confirmacao", "Status"], ["numero_nfe", "NF-e"], ["data_vencimento", "Vencimento"]
               ].map(([key, label]) => <th key={key} style={{ ...S.th, cursor: "pointer" }} onClick={() => ordenar(key)}>{label} {sort.key === key ? (sort.dir === 1 ? "▲" : "▼") : ""}</th>)}
               <th style={S.th}>Ações</th>
             </tr>
           </thead>
           <tbody>
-            {filtered.length === 0 && <tr><td colSpan={11} style={{ ...S.td, textAlign: "center", color: COLORS.textMuted, padding: 32 }}>Nenhum lançamento encontrado</td></tr>}
+            {filtered.length === 0 && <tr><td colSpan={12} style={{ ...S.td, textAlign: "center", color: COLORS.textMuted, padding: 32 }}>Nenhum lançamento encontrado</td></tr>}
             {filtered.map(p => {
-              const st = statusPagamento(p);
+              const st = statusLancamento(p);
               const devido = Number(p.valor_devido || 0);
-              const pago = Number(p.valor_pago ?? p.valor ?? 0);
+              const pago = valorPagoLancamento(p);
+              const saldo = saldoLancamento(p);
               return (
                 <tr key={p.id}>
                   <td style={{ ...S.td, color: COLORS.textMuted, fontFamily: "monospace" }}>#{p.id}</td>
@@ -1145,16 +1200,15 @@ const PaymentsScreen = ({ data, setData, currentUser, addLog }) => {
                   <td style={S.td}>{compradorNome(p.comprador_id)}</td>
                   <td style={{ ...S.td, fontWeight: 700, color: COLORS.danger }}>{fmt(devido)}</td>
                   <td style={{ ...S.td, fontWeight: 700, color: COLORS.success }}>{fmt(pago)}</td>
-                  <td style={S.td}><StatusBadge status={p.forma_pagamento === "Bonificação" ? "Bonificado" : "Pago"} /></td>
-                  <td style={S.td}>{p.anexo_nome ? <span style={{ fontSize: 12 }}>📎 {p.tipo_anexo}: {p.anexo_nome}</span> : "-"}</td>
+                  <td style={{ ...S.td, fontWeight: 700, color: saldo <= 0 ? COLORS.success : COLORS.danger }}>{fmt(saldo)}</td>
+                  <td style={S.td}><StatusBadge status={p.tipo_divida || "À Vista"} /></td>
+                  <td style={S.td}>{p.tipo_divida === "Parcelado" ? `${p.parcelas || 1}x` : "-"}</td>
                   <td style={S.td}><StatusBadge status={st} /></td>
                   <td style={{ ...S.td, fontFamily: "monospace", fontSize: 12 }}>{p.numero_nfe || "-"}</td>
-                  <td style={S.td}>{fmtDate(p.data_pagamento)}</td>
+                  <td style={S.td}>{fmtDate(p.data_vencimento || p.data_pagamento)}</td>
                   <td style={S.td}>
-                    <div style={{ display: "flex", gap: 6 }}>
-                      {currentUser.tipo === "Administrador" && st === "Aguardando confirmação" && (
-                        <button style={{ ...S.btn("success", "sm"), padding: "4px 7px" }} onClick={() => confirmarPagamento(p.id)}>Confirmar</button>
-                      )}
+                    <div style={{ display: "flex", gap: 6, flexWrap: "wrap" }}>
+                      {saldo > 0 && <button style={{ ...S.btn("success", "sm"), padding: "4px 7px" }} onClick={() => { setPayModal(p); setPayForm({ data_pagamento: new Date().toISOString().slice(0, 10), forma_pagamento: "PIX", tipo_anexo: "Comprovante" }); }}>Pagar</button>}
                       {p.anexo_nome && <button style={{ ...S.btn("outline", "sm"), padding: "4px 7px" }} onClick={() => downloadArquivo(data.anexos.find(a => Number(a.pagamento_id) === Number(p.id)), p)} title="Baixar anexo"><Icon name="download" size={12} /></button>}
                       {canDelete && <button style={{ ...S.btn("danger", "sm"), padding: "4px 7px" }} onClick={() => setConfirm(p.id)}><Icon name="trash" size={12} color="#fff" /></button>}
                     </div>
@@ -1167,13 +1221,13 @@ const PaymentsScreen = ({ data, setData, currentUser, addLog }) => {
       </div>
 
       {modal && (
-        <Modal title="Registrar Dívida / Pagamento" onClose={() => setModal(false)} wide>
+        <Modal title="Registrar Nova Dívida" onClose={() => setModal(false)} wide>
           <div style={S.grid(2)}>
             <div style={S.formRow}>
               <label style={S.label}>Fornecedor *</label>
               <select style={S.select} value={form.fornecedor_id || ""} onChange={e => setForm(p => ({ ...p, fornecedor_id: e.target.value }))}>
                 <option value="">Selecione...</option>
-                {data.fornecedores.map(f => <option key={f.id} value={f.id}>{f.nome_fantasia || f.razao_social}</option>)}
+                {data.fornecedores.filter(f => f.ativo !== false).map(f => <option key={f.id} value={f.id}>{f.nome_fantasia || f.razao_social}</option>)}
               </select>
             </div>
             <div style={S.formRow}>
@@ -1182,68 +1236,91 @@ const PaymentsScreen = ({ data, setData, currentUser, addLog }) => {
                 <option value="">Selecione...</option>
                 {(data.compradores || []).filter(c => c.ativo !== false && c.status_cadastro !== "Rejeitado").map(c => <option key={c.id} value={c.id}>{c.nome}</option>)}
               </select>
-              <p style={{ fontSize: 11, color: COLORS.textMuted, margin: "4px 0 0" }}>O fornecedor não fica preso a um comprador; cada dívida/pagamento recebe o comprador correto.</p>
             </div>
           </div>
 
           <div style={S.grid(3)}>
             <div style={S.formRow}>
-              <label style={S.label}>Valor devido (R$)</label>
+              <label style={S.label}>Valor da dívida (R$) *</label>
               <input style={S.input} type="number" value={form.valor_devido || ""} onChange={e => setForm(p => ({ ...p, valor_devido: e.target.value }))} />
             </div>
             <div style={S.formRow}>
-              <label style={S.label}>Valor pago (R$)</label>
-              <input style={S.input} type="number" value={form.valor_pago || ""} onChange={e => setForm(p => ({ ...p, valor_pago: e.target.value, valor: e.target.value }))} />
+              <label style={S.label}>Tipo *</label>
+              <select style={S.select} value={form.tipo_divida || "À Vista"} onChange={e => setForm(p => ({ ...p, tipo_divida: e.target.value, parcelas: e.target.value === "À Vista" ? 1 : p.parcelas }))}>
+                {DEBT_PAYMENT_TYPES.map(m => <option key={m} value={m}>{m}</option>)}
+              </select>
             </div>
             <div style={S.formRow}>
-              <label style={S.label}>Data</label>
-              <input style={S.input} type="date" value={form.data_pagamento || ""} onChange={e => setForm(p => ({ ...p, data_pagamento: e.target.value }))} />
+              <label style={S.label}>Parcelas</label>
+              <input style={S.input} type="number" min="1" disabled={form.tipo_divida !== "Parcelado"} value={form.parcelas || 1} onChange={e => setForm(p => ({ ...p, parcelas: e.target.value }))} />
             </div>
           </div>
 
-          <div style={S.grid(2)}>
+          <div style={S.grid(3)}>
             <div style={S.formRow}>
-              <label style={S.label}>Forma de Pagamento</label>
-              <select style={S.select} value={form.forma_pagamento || ""} onChange={e => setForm(p => ({ ...p, forma_pagamento: e.target.value, tipo_anexo: e.target.value === "Bonificação" ? "Nota de bonificação" : "Comprovante" }))}>
-                <option value="">Selecione...</option>
-                {PAYMENT_METHODS.map(m => <option key={m} value={m}>{m}</option>)}
-              </select>
+              <label style={S.label}>Data de vencimento</label>
+              <input style={S.input} type="date" value={form.data_vencimento || ""} onChange={e => setForm(p => ({ ...p, data_vencimento: e.target.value }))} />
             </div>
             <div style={S.formRow}>
               <label style={S.label}>Número NF-e</label>
               <input style={S.input} value={form.numero_nfe || ""} onChange={e => setForm(p => ({ ...p, numero_nfe: e.target.value }))} placeholder="NF-000" />
             </div>
-          </div>
-
-          <div style={S.grid(2)}>
             <div style={S.formRow}>
-              <label style={S.label}>Tipo de anexo</label>
-              <select style={S.select} value={form.tipo_anexo || ""} onChange={e => setForm(p => ({ ...p, tipo_anexo: e.target.value }))}>
-                <option value="">Selecione...</option>
-                <option value="Comprovante">Comprovante</option>
-                <option value="Nota de bonificação">Nota de bonificação</option>
-                <option value="NF-e">NF-e</option>
-                <option value="JPG / Imagem">JPG / Imagem</option>
-                <option value="XML">XML</option>
-              </select>
-            </div>
-            <div style={S.formRow}>
-              <label style={S.label}>Anexar arquivo</label>
-              <input style={S.input} type="file" accept=".pdf,.jpg,.jpeg,.png,.xml" onChange={e => setForm(p => ({ ...p, anexo_file: e.target.files?.[0], anexo_nome: e.target.files?.[0]?.name || "" }))} />
+              <label style={S.label}>Anexo da dívida/NF-e</label>
+              <input style={S.input} type="file" accept=".pdf,.jpg,.jpeg,.png,.xml" onChange={e => setForm(p => ({ ...p, anexo_file: e.target.files?.[0], anexo_nome: e.target.files?.[0]?.name || "", tipo_anexo: "NF-e" }))} />
             </div>
           </div>
 
           <div style={S.formRow}>
-            <label style={S.label}>Observação</label>
-            <textarea style={{ ...S.input, minHeight: 60, resize: "vertical" }} value={form.observacao || ""} onChange={e => setForm(p => ({ ...p, observacao: e.target.value }))} />
+            <label style={S.label}>Observação *</label>
+            <textarea style={{ ...S.input, minHeight: 70, resize: "vertical" }} value={form.observacao || ""} onChange={e => setForm(p => ({ ...p, observacao: e.target.value }))} placeholder="Obrigatório: descreva do que se trata essa dívida." />
           </div>
           <div style={{ display: "flex", gap: 10, justifyContent: "flex-end" }}>
             <button style={S.btn("outline")} onClick={() => setModal(false)}>Cancelar</button>
-            <button style={S.btn("primary")} onClick={savePayment}>Registrar lançamento</button>
+            <button style={S.btn("primary")} onClick={saveDebt}>Registrar dívida</button>
           </div>
         </Modal>
       )}
-      {confirm && <ConfirmModal message="Excluir este lançamento? O dashboard e a carteira do comprador serão atualizados automaticamente." onConfirm={() => doDelete(confirm)} onCancel={() => setConfirm(null)} />}
+
+      {payModal && (
+        <Modal title={`Registrar pagamento da dívida #${payModal.id}`} onClose={() => setPayModal(null)}>
+          <div style={{ background: COLORS.primaryLight, padding: 12, borderRadius: 8, marginBottom: 14 }}>
+            <p style={{ margin: 0, fontWeight: 700 }}>{fornecedorNome(payModal.fornecedor_id)} • {compradorNome(payModal.comprador_id)}</p>
+            <p style={{ margin: "4px 0 0", fontSize: 12, color: COLORS.textMuted }}>Devido: {fmt(payModal.valor_devido)} | Pago: {fmt(valorPagoLancamento(payModal))} | Aberto: {fmt(saldoLancamento(payModal))}</p>
+          </div>
+          <div style={S.grid(2)}>
+            <div style={S.formRow}>
+              <label style={S.label}>Valor pago (R$) *</label>
+              <input style={S.input} type="number" value={payForm.valor || ""} onChange={e => setPayForm(p => ({ ...p, valor: e.target.value }))} />
+            </div>
+            <div style={S.formRow}>
+              <label style={S.label}>Data do pagamento</label>
+              <input style={S.input} type="date" value={payForm.data_pagamento || ""} onChange={e => setPayForm(p => ({ ...p, data_pagamento: e.target.value }))} />
+            </div>
+          </div>
+          <div style={S.grid(2)}>
+            <div style={S.formRow}>
+              <label style={S.label}>Forma</label>
+              <select style={S.select} value={payForm.forma_pagamento || "PIX"} onChange={e => setPayForm(p => ({ ...p, forma_pagamento: e.target.value, tipo_anexo: e.target.value === "Bonificação" ? "Nota de bonificação" : "Comprovante" }))}>
+                {PAYMENT_METHODS.map(m => <option key={m} value={m}>{m}</option>)}
+              </select>
+            </div>
+            <div style={S.formRow}>
+              <label style={S.label}>Comprovante</label>
+              <input style={S.input} type="file" accept=".pdf,.jpg,.jpeg,.png,.xml" onChange={e => setPayForm(p => ({ ...p, anexo_file: e.target.files?.[0], anexo_nome: e.target.files?.[0]?.name || "" }))} />
+            </div>
+          </div>
+          <div style={S.formRow}>
+            <label style={S.label}>Observação do pagamento</label>
+            <textarea style={{ ...S.input, minHeight: 60, resize: "vertical" }} value={payForm.observacao || ""} onChange={e => setPayForm(p => ({ ...p, observacao: e.target.value }))} />
+          </div>
+          <div style={{ display: "flex", gap: 10, justifyContent: "flex-end" }}>
+            <button style={S.btn("outline")} onClick={() => setPayModal(null)}>Cancelar</button>
+            <button style={S.btn("primary")} onClick={savePaymentOnDebt}>Salvar pagamento</button>
+          </div>
+        </Modal>
+      )}
+      {confirm && <ConfirmModal message="Excluir este lançamento? O dashboard, o fornecedor e a carteira do comprador serão atualizados automaticamente." onConfirm={() => doDelete(confirm)} onCancel={() => setConfirm(null)} />}
     </div>
   );
 };
@@ -1760,7 +1837,23 @@ const SupplierPortal = ({ data, setData, currentUser, onLogout }) => {
     </div>
   );
 
-  const filteredPag = pagamentos.filter(p => !filterForma || p.forma_pagamento === filterForma);
+  const valorPagoLancamento = (p) => Number(p.valor_pago ?? p.valor ?? 0);
+  const saldoLancamento = (p) => Number(p.valor_devido || 0) - valorPagoLancamento(p);
+  const statusLancamento = (p) => {
+    const devido = Number(p.valor_devido || 0);
+    const pago = valorPagoLancamento(p);
+    if (p.confirmado === false) return "Aguardando confirmação";
+    if (pago <= 0) return "Pendente";
+    if (devido > 0 && pago >= devido) return "Pago";
+    return "Parcial";
+  };
+  const totaisFornecedor = pagamentos.filter(p => p.confirmado !== false).reduce((acc, p) => {
+    acc.devido += Number(p.valor_devido || 0);
+    acc.pago += valorPagoLancamento(p);
+    return acc;
+  }, { devido: 0, pago: 0 });
+  totaisFornecedor.saldo = totaisFornecedor.devido - totaisFornecedor.pago;
+  const filteredPag = pagamentos.filter(p => !filterForma || p.forma_pagamento === filterForma || p.tipo_divida === filterForma);
 
   return (
     <div style={{ ...S.app, background: "#f8fafc" }}>
@@ -1804,23 +1897,25 @@ const SupplierPortal = ({ data, setData, currentUser, onLogout }) => {
               <h1 style={S.pageTitle}>Meu Painel</h1>
               <p style={S.pageSub}>Visão geral da sua conta financeira</p>
               <div style={S.grid(2)}>
-                <MetricCard label="Saldo Devido" value={fmt(forn.saldo_devido)} icon="payments" color={COLORS.danger} />
-                <MetricCard label="Total Pago" value={fmt(forn.saldo_pago)} icon="check" color={COLORS.success} />
-                <MetricCard label="Bonificações" value={fmt(forn.saldo_bonificado)} icon="info" color={COLORS.warning} />
-                <MetricCard label="Pagamentos" value={pagamentos.length} icon="docs" color={COLORS.primary} />
+                <MetricCard label="Total Devido" value={fmt(totaisFornecedor.devido)} icon="payments" color={COLORS.danger} />
+                <MetricCard label="Total Pago" value={fmt(totaisFornecedor.pago)} icon="check" color={COLORS.success} />
+                <MetricCard label="Saldo Aberto" value={fmt(totaisFornecedor.saldo)} icon="info" color={totaisFornecedor.saldo <= 0 ? COLORS.success : COLORS.danger} />
+                <MetricCard label="Lançamentos" value={pagamentos.length} icon="docs" color={COLORS.primary} />
               </div>
               <div style={{ ...S.card, marginTop: 16 }}>
                 <p style={{ ...S.cardTitle, fontSize: 14, fontWeight: 600, color: COLORS.text, marginBottom: 14 }}>Últimos Pagamentos</p>
                 <table style={S.table}>
-                  <thead><tr>{["Data", "Valor", "Forma", "Anexo", "Status", "NF-e"].map(h => <th key={h} style={S.th}>{h}</th>)}</tr></thead>
+                  <thead><tr>{["Vencimento", "Valor Devido", "Valor Pago", "Saldo", "Tipo", "Anexo", "Status", "NF-e"].map(h => <th key={h} style={S.th}>{h}</th>)}</tr></thead>
                   <tbody>
                     {pagamentos.slice(0, 5).map(p => (
                       <tr key={p.id}>
-                        <td style={S.td}>{fmtDate(p.data_pagamento)}</td>
-                        <td style={{ ...S.td, fontWeight: 700, color: p.forma_pagamento === "Bonificação" ? COLORS.warning : COLORS.success }}>{fmt(p.valor)}</td>
-                        <td style={S.td}><StatusBadge status={p.forma_pagamento === "Bonificação" ? "Bonificado" : "Pago"} /></td>
+                        <td style={S.td}>{fmtDate(p.data_vencimento || p.data_pagamento)}</td>
+                        <td style={{ ...S.td, fontWeight: 700, color: COLORS.danger }}>{fmt(p.valor_devido)}</td>
+                        <td style={{ ...S.td, fontWeight: 700, color: COLORS.success }}>{fmt(valorPagoLancamento(p))}</td>
+                        <td style={{ ...S.td, fontWeight: 700, color: saldoLancamento(p) <= 0 ? COLORS.success : COLORS.danger }}>{fmt(saldoLancamento(p))}</td>
+                        <td style={S.td}><StatusBadge status={p.tipo_divida || "À Vista"} /></td>
                         <td style={S.td}>{p.anexo_nome ? <button style={{ ...S.btn("outline", "sm") }} onClick={() => downloadArquivo(data.anexos.find(a => a.pagamento_id === p.id), p)}><Icon name="download" size={12} /> {p.anexo_nome}</button> : "-"}</td>
-                        <td style={S.td}><StatusBadge status={p.status_confirmacao || (p.confirmado === false ? "Aguardando confirmação" : "Confirmado")} /></td>
+                        <td style={S.td}><StatusBadge status={statusLancamento(p)} /></td>
                         <td style={{ ...S.td, fontFamily: "monospace", fontSize: 12 }}>{p.numero_nfe || "-"}</td>
                       </tr>
                     ))}
@@ -1834,7 +1929,7 @@ const SupplierPortal = ({ data, setData, currentUser, onLogout }) => {
               <h1 style={S.pageTitle}>Histórico de Pagamentos</h1>
               <p style={S.pageSub}>Todos os pagamentos registrados na sua conta</p>
               <div style={{ ...S.searchBar, marginBottom: 16 }}>
-                <button style={S.btn("primary")} onClick={() => setPayModal(true)}><Icon name="plus" size={15} color="#fff" /> Enviar comprovante/nota</button>
+                <span style={{ color: COLORS.textMuted, fontSize: 13 }}>Os pagamentos são lançados pelo administrador na tela de Pagamentos.</span>
                 <select style={{ ...S.select, width: 200 }} value={filterForma} onChange={e => setFilterForma(e.target.value)}>
                   <option value="">Todas as formas</option>
                   {PAYMENT_METHODS.map(m => <option key={m} value={m}>{m}</option>)}
@@ -1842,16 +1937,18 @@ const SupplierPortal = ({ data, setData, currentUser, onLogout }) => {
               </div>
               <div style={S.card}>
                 <table style={S.table}>
-                  <thead><tr>{["Data", "Valor", "Forma", "Anexo", "Status", "NF-e", "Observação"].map(h => <th key={h} style={S.th}>{h}</th>)}</tr></thead>
+                  <thead><tr>{["Vencimento", "Valor Devido", "Valor Pago", "Saldo", "Tipo", "Anexo", "Status", "NF-e", "Observação"].map(h => <th key={h} style={S.th}>{h}</th>)}</tr></thead>
                   <tbody>
                     {filteredPag.length === 0 && <tr><td colSpan={8} style={{ ...S.td, textAlign: "center", color: COLORS.textMuted, padding: 32 }}>Nenhum pagamento encontrado</td></tr>}
                     {filteredPag.map(p => (
                       <tr key={p.id}>
-                        <td style={S.td}>{fmtDate(p.data_pagamento)}</td>
-                        <td style={{ ...S.td, fontWeight: 700, color: p.forma_pagamento === "Bonificação" ? COLORS.warning : COLORS.success }}>{fmt(p.valor)}</td>
-                        <td style={S.td}><StatusBadge status={p.forma_pagamento === "Bonificação" ? "Bonificado" : "Pago"} /></td>
+                        <td style={S.td}>{fmtDate(p.data_vencimento || p.data_pagamento)}</td>
+                        <td style={{ ...S.td, fontWeight: 700, color: COLORS.danger }}>{fmt(p.valor_devido)}</td>
+                        <td style={{ ...S.td, fontWeight: 700, color: COLORS.success }}>{fmt(valorPagoLancamento(p))}</td>
+                        <td style={{ ...S.td, fontWeight: 700, color: saldoLancamento(p) <= 0 ? COLORS.success : COLORS.danger }}>{fmt(saldoLancamento(p))}</td>
+                        <td style={S.td}><StatusBadge status={p.tipo_divida || "À Vista"} /></td>
                         <td style={S.td}>{p.anexo_nome ? <button style={{ ...S.btn("outline", "sm") }} onClick={() => downloadArquivo(data.anexos.find(a => a.pagamento_id === p.id), p)}><Icon name="download" size={12} /> {p.anexo_nome}</button> : "-"}</td>
-                        <td style={S.td}><StatusBadge status={p.status_confirmacao || (p.confirmado === false ? "Aguardando confirmação" : "Confirmado")} /></td>
+                        <td style={S.td}><StatusBadge status={statusLancamento(p)} /></td>
                         <td style={{ ...S.td, fontFamily: "monospace", fontSize: 12 }}>{p.numero_nfe || "-"}</td>
                         <td style={S.td}>{p.observacao || "-"}</td>
                       </tr>
