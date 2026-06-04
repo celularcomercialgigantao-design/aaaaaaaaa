@@ -770,9 +770,6 @@ const SuppliersScreen = ({ data, setData, currentUser, addLog }) => {
                 <td style={S.td}>
                   <div style={{ display: "flex", gap: 6 }}>
                     <button type="button" style={{ ...S.btn("outline", "sm"), padding: "5px 8px" }} onClick={(e) => { e.preventDefault(); e.stopPropagation(); openDetail(f); }} title="Ver detalhes"><Icon name="eye" size={13} /></button>
-                    {canEdit && (f.status_cadastro !== "Ativo") && <button type="button" style={{ ...S.btn("success", "sm"), padding: "5px 8px" }} onClick={(e) => { e.preventDefault(); e.stopPropagation(); aprovarFornecedor(f.id); }} title="Aprovar">Aprovar</button>}
-                    {canEdit && (f.status_cadastro !== "Rejeitado") && <button type="button" style={{ ...S.btn("warning", "sm"), padding: "5px 8px" }} onClick={(e) => { e.preventDefault(); e.stopPropagation(); rejeitarFornecedor(f.id); }} title="Rejeitar">Rejeitar</button>}
-                    {canEdit && f.status_cadastro !== "Inativo" && <button type="button" style={{ ...S.btn("warning", "sm"), padding: "5px 8px" }} onClick={(e) => { e.preventDefault(); e.stopPropagation(); inativarFornecedor(f.id); }} title="Inativar">Inativar</button>}
                     {canEdit && <button type="button" style={{ ...S.btn("outline", "sm"), padding: "5px 8px" }} onClick={(e) => { e.preventDefault(); e.stopPropagation(); openEdit(f); }} title="Editar"><Icon name="edit" size={13} /></button>}
                     {canDelete && <button type="button" style={{ ...S.btn("danger", "sm"), padding: "5px 8px" }} onClick={(e) => { e.preventDefault(); e.stopPropagation(); setConfirm(f.id); }} title="Excluir"><Icon name="trash" size={13} color="#fff" /></button>}
                   </div>
@@ -970,9 +967,6 @@ const BuyersScreen = ({ data, setData, currentUser, addLog }) => {
                   <td style={S.td}>
                     <div style={{ display: "flex", gap: 6, flexWrap: "wrap" }}>
                       <button type="button" style={{ ...S.btn("outline", "sm"), padding: "5px 8px" }} onClick={(e) => { e.preventDefault(); e.stopPropagation(); openEdit(c); }}><Icon name="edit" size={13} /></button>
-                      {currentUser.tipo === "Administrador" && c.status_cadastro !== "Ativo" && <button type="button" style={{ ...S.btn("success", "sm"), padding: "5px 8px" }} onClick={(e) => { e.preventDefault(); e.stopPropagation(); aprovarBuyer(c.id); }}>Aprovar</button>}
-                      {currentUser.tipo === "Administrador" && c.status_cadastro !== "Rejeitado" && <button type="button" style={{ ...S.btn("warning", "sm"), padding: "5px 8px" }} onClick={(e) => { e.preventDefault(); e.stopPropagation(); rejeitarBuyer(c.id); }}>Rejeitar</button>}
-                      {currentUser.tipo === "Administrador" && c.status_cadastro !== "Inativo" && <button type="button" style={{ ...S.btn("warning", "sm"), padding: "5px 8px" }} onClick={(e) => { e.preventDefault(); e.stopPropagation(); inativarBuyer(c.id); }}>Inativar</button>}
                       {currentUser.tipo === "Administrador" && <button type="button" style={{ ...S.btn("danger", "sm"), padding: "5px 8px" }} onClick={(e) => { e.preventDefault(); e.stopPropagation(); setConfirm(c.id); }}><Icon name="trash" size={13} color="#fff" /></button>}
                     </div>
                   </td>
