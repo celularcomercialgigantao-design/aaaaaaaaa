@@ -44,15 +44,23 @@ const CLOUD_ENABLED = Boolean(CLOUD_URL && CLOUD_KEY);
 const CLOUD_TABLE = "app_state";
 const CLOUD_ROW_ID = 1;
 
+function hasUsefulCloudData(value) {
+  return Boolean(value && typeof value === "object" && Object.keys(value).length > 0);
+}
+
 async function loadCloudData() {
   if (!CLOUD_ENABLED) return null;
   try {
     const res = await fetch(`${CLOUD_URL}/rest/v1/${CLOUD_TABLE}?id=eq.${CLOUD_ROW_ID}&select=data`, {
       headers: { apikey: CLOUD_KEY, Authorization: `Bearer ${CLOUD_KEY}` }
     });
-    if (!res.ok) throw new Error("Falha ao carregar dados online");
+    if (!res.ok) {
+      const msg = await res.text().catch(() => "");
+      throw new Error(`Falha ao carregar dados online: ${res.status} ${msg}`);
+    }
     const rows = await res.json();
-    return rows?.[0]?.data ? normalizeData(rows[0].data) : null;
+    const cloud = rows?.[0]?.data;
+    return hasUsefulCloudData(cloud) ? normalizeData(cloud) : null;
   } catch (err) {
     console.warn("Sincronização online indisponível:", err);
     return null;
@@ -60,20 +68,43 @@ async function loadCloudData() {
 }
 
 async function saveCloudData(data) {
-  if (!CLOUD_ENABLED) return;
+  if (!CLOUD_ENABLED) return false;
+  const payload = JSON.stringify({ data: normalizeData(data), updated_at: new Date().toISOString() });
   try {
-    await fetch(`${CLOUD_URL}/rest/v1/${CLOUD_TABLE}?on_conflict=id`, {
-      method: "POST",
+    // Atualiza a linha principal. É mais confiável que upsert quando a linha id=1 já existe.
+    let res = await fetch(`${CLOUD_URL}/rest/v1/${CLOUD_TABLE}?id=eq.${CLOUD_ROW_ID}`, {
+      method: "PATCH",
       headers: {
         apikey: CLOUD_KEY,
         Authorization: `Bearer ${CLOUD_KEY}`,
         "Content-Type": "application/json",
-        Prefer: "resolution=merge-duplicates"
+        Prefer: "return=minimal"
       },
-      body: JSON.stringify({ id: CLOUD_ROW_ID, data, updated_at: new Date().toISOString() })
+      body: payload
     });
+
+    // Se a linha ainda não existir, cria com id=1.
+    if (!res.ok) {
+      const patchError = await res.text().catch(() => "");
+      res = await fetch(`${CLOUD_URL}/rest/v1/${CLOUD_TABLE}`, {
+        method: "POST",
+        headers: {
+          apikey: CLOUD_KEY,
+          Authorization: `Bearer ${CLOUD_KEY}`,
+          "Content-Type": "application/json",
+          Prefer: "resolution=merge-duplicates,return=minimal"
+        },
+        body: JSON.stringify({ id: CLOUD_ROW_ID, data: normalizeData(data), updated_at: new Date().toISOString() })
+      });
+      if (!res.ok) {
+        const postError = await res.text().catch(() => "");
+        throw new Error(`PATCH: ${patchError} | POST: ${postError}`);
+      }
+    }
+    return true;
   } catch (err) {
     console.warn("Falha ao salvar dados online:", err);
+    return false;
   }
 }
 
@@ -2172,9 +2203,14 @@ export default function App() {
   useEffect(() => {
     let mounted = true;
     loadCloudData().then(remote => {
-      if (mounted && remote) {
+      if (!mounted) return;
+      if (remote) {
         setDataState(remote);
         localStorage.setItem("saas_data", JSON.stringify(remote));
+      } else if (CLOUD_ENABLED) {
+        // Se o Supabase está vazio (data = {}), manda os dados locais/iniciais para a nuvem.
+        const local = normalizeData(JSON.parse(localStorage.getItem("saas_data") || "null") || data);
+        saveCloudData(local);
       }
     });
     return () => { mounted = false; };
