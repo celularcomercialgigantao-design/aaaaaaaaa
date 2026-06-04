@@ -33,6 +33,50 @@ const STATUS_OPTIONS = ["Pendente","Pago","Parcial","Bonificado"];
 const USER_TYPES = ["Administrador","Operador","Fornecedor"];
 const ESTADOS = ["AC","AL","AM","AP","BA","CE","DF","ES","GO","MA","MG","MS","MT","PA","PB","PE","PI","PR","RJ","RN","RO","RR","RS","SC","SE","SP","TO"];
 
+
+// ─── CLOUD SYNC (SUPABASE REST) ───────────────────────────────────────────────
+// Para os cadastros aparecerem em todos os aparelhos, configure no Vercel:
+// VITE_SUPABASE_URL e VITE_SUPABASE_ANON_KEY.
+// Tabela necessária no Supabase: app_state (id int primary key, data jsonb, updated_at timestamptz).
+const CLOUD_URL = (import.meta?.env?.VITE_SUPABASE_URL || "").replace(/\/$/, "");
+const CLOUD_KEY = import.meta?.env?.VITE_SUPABASE_ANON_KEY || "";
+const CLOUD_ENABLED = Boolean(CLOUD_URL && CLOUD_KEY);
+const CLOUD_TABLE = "app_state";
+const CLOUD_ROW_ID = 1;
+
+async function loadCloudData() {
+  if (!CLOUD_ENABLED) return null;
+  try {
+    const res = await fetch(`${CLOUD_URL}/rest/v1/${CLOUD_TABLE}?id=eq.${CLOUD_ROW_ID}&select=data`, {
+      headers: { apikey: CLOUD_KEY, Authorization: `Bearer ${CLOUD_KEY}` }
+    });
+    if (!res.ok) throw new Error("Falha ao carregar dados online");
+    const rows = await res.json();
+    return rows?.[0]?.data ? normalizeData(rows[0].data) : null;
+  } catch (err) {
+    console.warn("Sincronização online indisponível:", err);
+    return null;
+  }
+}
+
+async function saveCloudData(data) {
+  if (!CLOUD_ENABLED) return;
+  try {
+    await fetch(`${CLOUD_URL}/rest/v1/${CLOUD_TABLE}?on_conflict=id`, {
+      method: "POST",
+      headers: {
+        apikey: CLOUD_KEY,
+        Authorization: `Bearer ${CLOUD_KEY}`,
+        "Content-Type": "application/json",
+        Prefer: "resolution=merge-duplicates"
+      },
+      body: JSON.stringify({ id: CLOUD_ROW_ID, data, updated_at: new Date().toISOString() })
+    });
+  } catch (err) {
+    console.warn("Falha ao salvar dados online:", err);
+  }
+}
+
 // ─── INITIAL DATA ────────────────────────────────────────────────────────────
 const initData = () => {
   const stored = localStorage.getItem("saas_data");
@@ -354,8 +398,8 @@ const LoginScreen = ({ onLogin, portalMode, data, setData, onBackHome }) => {
   const handleLogin = () => {
     setLoading(true);
     setTimeout(() => {
-      const base = localStorage.getItem("saas_data") ? JSON.parse(localStorage.getItem("saas_data")) : initData();
-      const user = base.users.find(u => u.email === email && u.senha === senha);
+      const base = normalizeData(data || initData());
+      const user = base.users.find(u => String(u.email).toLowerCase() === String(email).toLowerCase() && u.senha === senha);
       if (!user) { setError("E-mail ou senha incorretos."); setLoading(false); return; }
       if (user.tipo === "Fornecedor" && !user.ativo) { setError("Seu cadastro foi para análise. Aguarde o administrador vincular sua conta ao fornecedor."); setLoading(false); return; }
       if (!user.ativo) { setError("Usuário inativo. Contate o administrador."); setLoading(false); return; }
@@ -2122,7 +2166,31 @@ export default function App() {
     const normalized = typeof next === "function" ? normalizeData(next(data)) : normalizeData(next);
     setDataState(normalized);
     localStorage.setItem("saas_data", JSON.stringify(normalized));
+    saveCloudData(normalized);
   }, [data]);
+
+  useEffect(() => {
+    let mounted = true;
+    loadCloudData().then(remote => {
+      if (mounted && remote) {
+        setDataState(remote);
+        localStorage.setItem("saas_data", JSON.stringify(remote));
+      }
+    });
+    return () => { mounted = false; };
+  }, []);
+
+  useEffect(() => {
+    if (!CLOUD_ENABLED) return;
+    const timer = setInterval(async () => {
+      const remote = await loadCloudData();
+      if (remote) {
+        setDataState(remote);
+        localStorage.setItem("saas_data", JSON.stringify(remote));
+      }
+    }, 5000);
+    return () => clearInterval(timer);
+  }, []);
 
   useEffect(() => {
     const onStorage = (e) => {
