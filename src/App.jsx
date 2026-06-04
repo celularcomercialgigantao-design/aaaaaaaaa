@@ -49,7 +49,7 @@ function hasUsefulCloudData(value) {
 }
 
 async function loadCloudData() {
-  if (!CLOUD_ENABLED) return null;
+  if (!CLOUD_ENABLED) { localStorage.setItem("saas_cloud_status", "OFF: variáveis VITE_SUPABASE_URL/VITE_SUPABASE_ANON_KEY não encontradas no build"); return null; }
   try {
     const res = await fetch(`${CLOUD_URL}/rest/v1/${CLOUD_TABLE}?id=eq.${CLOUD_ROW_ID}&select=data`, {
       headers: { apikey: CLOUD_KEY, Authorization: `Bearer ${CLOUD_KEY}` }
@@ -68,42 +68,59 @@ async function loadCloudData() {
 }
 
 async function saveCloudData(data) {
-  if (!CLOUD_ENABLED) return false;
-  const payload = JSON.stringify({ data: normalizeData(data), updated_at: new Date().toISOString() });
+  if (!CLOUD_ENABLED) {
+    localStorage.setItem("saas_cloud_status", "OFF: variáveis VITE_SUPABASE_URL/VITE_SUPABASE_ANON_KEY não encontradas no build");
+    return false;
+  }
+
+  const normalized = normalizeData(data);
+  const body = JSON.stringify({
+    id: CLOUD_ROW_ID,
+    data: normalized,
+    updated_at: new Date().toISOString()
+  });
+
   try {
-    // Atualiza a linha principal. É mais confiável que upsert quando a linha id=1 já existe.
-    let res = await fetch(`${CLOUD_URL}/rest/v1/${CLOUD_TABLE}?id=eq.${CLOUD_ROW_ID}`, {
-      method: "PATCH",
+    // Upsert direto é a forma mais segura para Supabase REST.
+    // Se a linha id=1 existir, atualiza. Se não existir, cria.
+    const upsert = await fetch(`${CLOUD_URL}/rest/v1/${CLOUD_TABLE}?on_conflict=id`, {
+      method: "POST",
       headers: {
         apikey: CLOUD_KEY,
         Authorization: `Bearer ${CLOUD_KEY}`,
         "Content-Type": "application/json",
-        Prefer: "return=minimal"
+        Prefer: "resolution=merge-duplicates,return=representation"
       },
-      body: payload
+      body
     });
 
-    // Se a linha ainda não existir, cria com id=1.
-    if (!res.ok) {
-      const patchError = await res.text().catch(() => "");
-      res = await fetch(`${CLOUD_URL}/rest/v1/${CLOUD_TABLE}`, {
-        method: "POST",
+    if (!upsert.ok) {
+      const upsertError = await upsert.text().catch(() => "");
+      // Plano B: patch na linha existente.
+      const patch = await fetch(`${CLOUD_URL}/rest/v1/${CLOUD_TABLE}?id=eq.${CLOUD_ROW_ID}`, {
+        method: "PATCH",
         headers: {
           apikey: CLOUD_KEY,
           Authorization: `Bearer ${CLOUD_KEY}`,
           "Content-Type": "application/json",
-          Prefer: "resolution=merge-duplicates,return=minimal"
+          Prefer: "return=representation"
         },
-        body: JSON.stringify({ id: CLOUD_ROW_ID, data: normalizeData(data), updated_at: new Date().toISOString() })
+        body: JSON.stringify({ data: normalized, updated_at: new Date().toISOString() })
       });
-      if (!res.ok) {
-        const postError = await res.text().catch(() => "");
-        throw new Error(`PATCH: ${patchError} | POST: ${postError}`);
+      if (!patch.ok) {
+        const patchError = await patch.text().catch(() => "");
+        throw new Error(`UPSERT: ${upsertError} | PATCH: ${patchError}`);
       }
     }
+
+    localStorage.setItem("saas_cloud_status", `OK: salvo no Supabase em ${new Date().toLocaleString()}`);
+    localStorage.removeItem("saas_cloud_error");
     return true;
   } catch (err) {
+    const msg = err?.message || String(err);
     console.warn("Falha ao salvar dados online:", err);
+    localStorage.setItem("saas_cloud_status", "ERRO ao salvar no Supabase");
+    localStorage.setItem("saas_cloud_error", msg);
     return false;
   }
 }
@@ -394,6 +411,27 @@ const SimpleChart = ({ type, data, labels, color = COLORS.primary, height = 200 
       <div style={{ display: "flex", justifyContent: "space-between", padding: "0 4px" }}>
         {labels.map((l, i) => <span key={i} style={{ fontSize: 9, color: COLORS.textMuted }}>{l}</span>)}
       </div>
+    </div>
+  );
+};
+
+
+const CloudStatus = () => {
+  const [status, setStatus] = useState(() => localStorage.getItem("saas_cloud_status") || (CLOUD_ENABLED ? "Conectando ao Supabase..." : "Banco online NÃO configurado"));
+  const [error, setError] = useState(() => localStorage.getItem("saas_cloud_error") || "");
+  useEffect(() => {
+    const timer = setInterval(() => {
+      setStatus(localStorage.getItem("saas_cloud_status") || (CLOUD_ENABLED ? "Conectando ao Supabase..." : "Banco online NÃO configurado"));
+      setError(localStorage.getItem("saas_cloud_error") || "");
+    }, 1500);
+    return () => clearInterval(timer);
+  }, []);
+  const ok = status.startsWith("OK");
+  const off = status.startsWith("OFF") || status.includes("NÃO");
+  return (
+    <div style={{ position:"fixed", left:12, bottom:12, zIndex:99999, maxWidth:420, background: ok ? COLORS.successLight : off ? COLORS.warningLight : COLORS.dangerLight, color: ok ? COLORS.success : off ? COLORS.warning : COLORS.danger, border:`1px solid ${ok ? COLORS.success : off ? COLORS.warning : COLORS.danger}`, borderRadius:10, padding:"10px 12px", fontSize:12, boxShadow:"0 8px 25px rgba(0,0,0,.12)" }}>
+      <b>Banco online:</b> {status}
+      {error && <div style={{ marginTop:4, wordBreak:"break-word" }}>Erro: {error}</div>}
     </div>
   );
 };
@@ -2197,7 +2235,11 @@ export default function App() {
     const normalized = typeof next === "function" ? normalizeData(next(data)) : normalizeData(next);
     setDataState(normalized);
     localStorage.setItem("saas_data", JSON.stringify(normalized));
-    saveCloudData(normalized);
+    saveCloudData(normalized).then(ok => {
+      if (!ok && CLOUD_ENABLED) {
+        console.warn("Não salvou no Supabase. Veja saas_cloud_error no localStorage.");
+      }
+    });
   }, [data]);
 
   useEffect(() => {
@@ -2267,12 +2309,13 @@ export default function App() {
   };
 
   // Portal de fornecedor
-  if (screen === "portal-login") return <LoginScreen onLogin={handleLogin} portalMode data={data} setData={setData} onBackHome={() => setScreen("login")} />;
-  if (screen === "portal" && currentUser?.tipo === "Fornecedor") return <SupplierPortal data={data} setData={setData} currentUser={currentUser} onLogout={handleLogout} />;
+  if (screen === "portal-login") return <><LoginScreen onLogin={handleLogin} portalMode data={data} setData={setData} onBackHome={() => setScreen("login")} /><CloudStatus /></>;
+  if (screen === "portal" && currentUser?.tipo === "Fornecedor") return <><SupplierPortal data={data} setData={setData} currentUser={currentUser} onLogout={handleLogout} /><CloudStatus /></>;
   if (screen === "login") {
     return (
       <div>
         <LoginScreen onLogin={handleLogin} data={data} setData={setData} />
+        <CloudStatus />
         <div style={{ position: "fixed", bottom: 24, right: 24 }}>
           <button style={{ ...S.btn("primary"), background: COLORS.primary, color: "#fff", boxShadow: "0 10px 30px rgba(0,155,78,0.35)", padding: "14px 24px", fontSize: 15, borderRadius: 12 }} onClick={() => setScreen("portal-login")}>
             <Icon name="portal" size={18} color="#fff" /> Portal do Fornecedor
@@ -2346,6 +2389,8 @@ export default function App() {
           {renderPage()}
         </div>
       </div>
+
+      <CloudStatus />
 
       {/* Toast */}
       {toast && (
