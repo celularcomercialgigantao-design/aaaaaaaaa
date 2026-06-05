@@ -268,6 +268,40 @@ const S = {
   loginCard: { background: "#fff", borderRadius: 16, padding: 40, width: "min(90vw, 400px)", boxShadow: "0 24px 80px rgba(0,0,0,0.3)" },
 };
 
+
+const ResponsiveStyles = () => (
+  <style>{`
+    @media (max-width: 768px) {
+      html, body, #root { width: 100%; max-width: 100%; overflow-x: hidden; }
+      body { margin: 0; }
+      [data-gig-app] { display: block !important; min-height: 100vh !important; width: 100% !important; }
+      [data-gig-sidebar] { position: relative !important; width: 100% !important; height: auto !important; min-height: 0 !important; max-height: none !important; }
+      [data-gig-sidebar] > div:first-child { padding: 12px 12px 8px !important; text-align: center !important; }
+      [data-gig-sidebar] img { max-width: 122px !important; }
+      [data-gig-sidebar] nav { display: flex !important; gap: 8px !important; overflow-x: auto !important; padding: 8px 10px 12px !important; -webkit-overflow-scrolling: touch !important; }
+      [data-gig-sidebar] nav p { display: none !important; }
+      [data-gig-sidebar] nav > div { flex: 0 0 auto !important; border-left: 0 !important; border-radius: 999px !important; padding: 10px 12px !important; white-space: nowrap !important; }
+      [data-gig-sidebar] > div:last-child { display: none !important; }
+      [data-gig-main] { margin-left: 0 !important; min-height: auto !important; width: 100% !important; }
+      [data-gig-topbar] { position: relative !important; height: auto !important; min-height: 54px !important; padding: 10px 12px !important; flex-wrap: wrap !important; gap: 10px !important; }
+      [data-gig-topbar] > div { flex-wrap: wrap !important; }
+      [data-gig-content] { padding: 12px !important; width: 100% !important; box-sizing: border-box !important; }
+      div[style*="grid-template-columns"] { grid-template-columns: 1fr !important; }
+      div[style*="display: flex"] { max-width: 100% !important; }
+      input, select, textarea { font-size: 16px !important; min-height: 42px !important; }
+      button { min-height: 38px !important; }
+      table { display: block !important; width: 100% !important; overflow-x: auto !important; white-space: nowrap !important; -webkit-overflow-scrolling: touch !important; border-spacing: 0 !important; }
+      th, td { padding: 10px 9px !important; font-size: 12px !important; }
+      [data-gig-modal-box] { width: calc(100vw - 24px) !important; max-width: calc(100vw - 24px) !important; padding: 18px !important; }
+      [data-gig-login-card] { width: calc(100vw - 28px) !important; padding: 24px 18px !important; }
+      [data-gig-login-box] { padding: 14px !important; align-items: flex-start !important; padding-top: 30px !important; }
+    }
+    @media (min-width: 769px) {
+      [data-gig-app] { min-width: 1024px; }
+    }
+  `}</style>
+);
+
 // ─── ICONS ───────────────────────────────────────────────────────────────────
 const Icon = ({ name, size = 16, color }) => {
   const icons = {
@@ -311,7 +345,7 @@ const StatusBadge = ({ status }) => {
 // ─── MODAL ───────────────────────────────────────────────────────────────────
 const Modal = ({ title, onClose, children, wide }) => (
   <div style={S.modal} onClick={(e) => e.target === e.currentTarget && onClose()}>
-    <div style={{ ...S.modalBox, width: wide ? "min(94vw, 800px)" : undefined }}>
+    <div style={{ ...S.modalBox, width: wide ? "min(94vw, 800px)" : undefined }} data-gig-modal-box>
       <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 20 }}>
         <h3 style={{ ...S.modalTitle, margin: 0 }}>{title}</h3>
         <button style={{ ...S.btn("ghost"), padding: 6 }} onClick={onClose}><Icon name="x" size={18} /></button>
@@ -324,7 +358,7 @@ const Modal = ({ title, onClose, children, wide }) => (
 // ─── CONFIRM MODAL ────────────────────────────────────────────────────────────
 const ConfirmModal = ({ message, onConfirm, onCancel }) => (
   <div style={S.modal} onClick={(e) => e.target === e.currentTarget && onCancel()}>
-    <div style={{ ...S.modalBox, width: "min(90vw, 400px)" }}>
+    <div style={{ ...S.modalBox, width: "min(90vw, 400px)" }} data-gig-modal-box>
       <div style={{ display: "flex", gap: 12, alignItems: "flex-start", marginBottom: 20 }}>
         <div style={{ background: COLORS.dangerLight, borderRadius: "50%", width: 40, height: 40, display: "flex", alignItems: "center", justifyContent: "center", flexShrink: 0 }}>
           <Icon name="trash" size={18} color={COLORS.danger} />
@@ -382,6 +416,23 @@ Observação: ${pagamento?.observacao || "-"}`;
   if (revoke) setTimeout(() => URL.revokeObjectURL(href), 1000);
 };
 const fmtDate = (d) => d ? new Date(d + "T00:00:00").toLocaleDateString("pt-BR") : "-";
+const valorPagoLancamentoGlobal = (p) => Number(p?.valor_pago ?? p?.valor ?? 0);
+const valorDevidoLancamentoGlobal = (p) => Number(p?.valor_devido || 0);
+const saldoAbertoLancamentoGlobal = (p) => Math.max(0, valorDevidoLancamentoGlobal(p) - valorPagoLancamentoGlobal(p));
+const resumoFornecedorFinanceiro = (data, fornecedorId) => {
+  const itens = (data?.pagamentos || []).filter(p => p.confirmado !== false && Number(p.fornecedor_id) === Number(fornecedorId));
+  const devido = itens.reduce((s, p) => s + valorDevidoLancamentoGlobal(p), 0);
+  const pago = itens.reduce((s, p) => s + valorPagoLancamentoGlobal(p), 0);
+  const bonificado = itens.reduce((s, p) => String(p.forma_pagamento || '').toLowerCase().includes('bonifica') ? s + valorPagoLancamentoGlobal(p) : s, 0);
+  return { devido, pago, bonificado, saldoAberto: Math.max(0, devido - pago), saldoCarteira: pago - devido };
+};
+const resumoCompradorFinanceiro = (data, compradorId) => {
+  const itens = (data?.pagamentos || []).filter(p => p.confirmado !== false && Number(p.comprador_id) === Number(compradorId));
+  const devido = itens.reduce((s, p) => s + valorDevidoLancamentoGlobal(p), 0);
+  const pago = itens.reduce((s, p) => s + valorPagoLancamentoGlobal(p), 0);
+  return { devido, pago, saldoAberto: Math.max(0, devido - pago), saldoCarteira: pago - devido };
+};
+
 
 // ─── METRIC CARD ──────────────────────────────────────────────────────────────
 const MetricCard = ({ label, value, sub, color, icon }) => (
@@ -589,8 +640,8 @@ const LoginScreen = ({ onLogin, portalMode, data, setData, onBackHome }) => {
   );
 
   return (
-    <div style={S.loginBox}>
-      <div style={S.loginCard}>
+    <div style={S.loginBox} data-gig-login-box>
+      <div style={S.loginCard} data-gig-login-card>
         <div style={{ textAlign: "center", marginBottom: 28 }}>
           <div style={{ width: 52, height: 52, background: portalMode ? COLORS.secondary : COLORS.primary, borderRadius: 14, display: "flex", alignItems: "center", justifyContent: "center", margin: "0 auto 14px" }}>
             {portalMode ? <Icon name="portal" size={26} color="#fff" /> : <Icon name="building" size={26} color="#fff" />}
@@ -884,7 +935,9 @@ const SuppliersScreen = ({ data, setData, currentUser, addLog }) => {
           </thead>
           <tbody>
             {filtered.length === 0 && <tr><td colSpan={8} style={{ ...S.td, textAlign: "center", color: COLORS.textMuted, padding: 32 }}>Nenhum fornecedor encontrado</td></tr>}
-            {filtered.map(f => (
+            {filtered.map(f => {
+              const fin = resumoFornecedorFinanceiro(data, f.id);
+              return (
               <tr key={f.id} style={{ cursor: "pointer" }}>
                 <td style={S.td}>
                   <p style={{ margin: 0, fontWeight: 600 }}>{f.razao_social}</p>
@@ -894,8 +947,8 @@ const SuppliersScreen = ({ data, setData, currentUser, addLog }) => {
                 <td style={S.td}>{f.contato || f.email}</td>
                 <td style={S.td}>{f.cidade}/{f.estado}</td>
                 <td style={S.td}><StatusBadge status={f.status_cadastro || (f.ativo === false ? "Em análise" : "Ativo")} /></td>
-                <td style={{ ...S.td, color: COLORS.danger, fontWeight: 600 }}>{fmt(f.saldo_devido)}</td>
-                <td style={{ ...S.td, color: COLORS.success, fontWeight: 600 }}>{fmt(f.saldo_pago)}</td>
+                <td style={{ ...S.td, color: COLORS.danger, fontWeight: 600 }}>{fmt(fin.saldoAberto)}</td>
+                <td style={{ ...S.td, color: COLORS.success, fontWeight: 600 }}>{fmt(fin.pago)}</td>
                 <td style={S.td}>
                   <div style={{ display: "flex", gap: 6 }}>
                     <button type="button" style={{ ...S.btn("outline", "sm"), padding: "5px 8px" }} onClick={(e) => { e.preventDefault(); e.stopPropagation(); openDetail(f); }} title="Ver detalhes"><Icon name="eye" size={13} /></button>
@@ -904,7 +957,8 @@ const SuppliersScreen = ({ data, setData, currentUser, addLog }) => {
                   </div>
                 </td>
               </tr>
-            ))}
+              );
+            })}
           </tbody>
         </table>
       </div>
@@ -929,9 +983,9 @@ const SuppliersScreen = ({ data, setData, currentUser, addLog }) => {
           </div>
           <div style={{ borderTop: `1px solid ${COLORS.border}`, paddingTop: 16, marginTop: 8 }}>
             <div style={S.grid(3)}>
-              <MetricCard label="Saldo Devido" value={fmt(detail.saldo_devido)} color={COLORS.danger} />
-              <MetricCard label="Total Pago" value={fmt(detail.saldo_pago)} color={COLORS.success} />
-              <MetricCard label="Bonificado" value={fmt(detail.saldo_bonificado)} color={COLORS.warning} />
+              <MetricCard label="Saldo Devido" value={fmt(resumoFornecedorFinanceiro(data, detail.id).saldoAberto)} color={COLORS.danger} />
+              <MetricCard label="Total Pago" value={fmt(resumoFornecedorFinanceiro(data, detail.id).pago)} color={COLORS.success} />
+              <MetricCard label="Bonificado" value={fmt(resumoFornecedorFinanceiro(data, detail.id).bonificado)} color={COLORS.warning} />
             </div>
           </div>
           {detail.observacoes && <div style={{ marginTop: 14, background: "#f8fafc", borderRadius: 8, padding: 12 }}>
@@ -1893,26 +1947,32 @@ const DocumentsScreen = ({ data, setData, currentUser, addLog }) => {
 // ─── REPORTS SCREEN ───────────────────────────────────────────────────────────
 const ReportsScreen = ({ data }) => {
   const [filterForn, setFilterForn] = useState("");
+  const [filterComp, setFilterComp] = useState("");
   const [filterForma, setFilterForma] = useState("");
   const [dateFrom, setDateFrom] = useState("");
   const [dateTo, setDateTo] = useState("");
   const [tab, setTab] = useState("payments");
 
   const filtered = data.pagamentos.filter(p => {
-    const mForn = !filterForn || p.fornecedor_id === Number(filterForn);
-    const mForma = !filterForma || p.forma_pagamento === filterForma;
-    const mFrom = !dateFrom || p.data_pagamento >= dateFrom;
-    const mTo = !dateTo || p.data_pagamento <= dateTo;
-    return mForn && mForma && mFrom && mTo;
+    const dataBase = p.data_pagamento || p.data_vencimento || p.created_at?.slice?.(0,10) || "";
+    const mForn = !filterForn || Number(p.fornecedor_id) === Number(filterForn);
+    const mComp = !filterComp || Number(p.comprador_id) === Number(filterComp);
+    const mForma = !filterForma || p.forma_pagamento === filterForma || p.tipo_divida === filterForma;
+    const mFrom = !dateFrom || dataBase >= dateFrom;
+    const mTo = !dateTo || dataBase <= dateTo;
+    return mForn && mComp && mForma && mFrom && mTo && p.confirmado !== false;
   });
 
-  const totalFiltrado = filtered.reduce((s, p) => s + p.valor, 0);
+  const totalDevidoFiltrado = filtered.reduce((s, p) => s + valorDevidoLancamentoGlobal(p), 0);
+  const totalPagoFiltrado = filtered.reduce((s, p) => s + valorPagoLancamentoGlobal(p), 0);
+  const saldoAbertoFiltrado = Math.max(0, totalDevidoFiltrado - totalPagoFiltrado);
 
   const exportCSV = () => {
-    const rows = [["ID","Fornecedor","Valor","Forma","NF-e","Data","Observação"]];
+    const rows = [["ID","Fornecedor","Comprador","Valor Devido","Valor Pago","Saldo Aberto","Forma","Tipo","NF-e","Vencimento","Pagamento","Observação"]];
     filtered.forEach(p => {
-      const f = data.fornecedores.find(f => f.id === p.fornecedor_id);
-      rows.push([p.id, f?.razao_social || "", p.valor, p.forma_pagamento, p.numero_nfe, p.data_pagamento, p.observacao]);
+      const f = data.fornecedores.find(f => Number(f.id) === Number(p.fornecedor_id));
+      const c = (data.compradores || []).find(c => Number(c.id) === Number(p.comprador_id));
+      rows.push([p.id, f?.razao_social || "", c?.nome || "", valorDevidoLancamentoGlobal(p), valorPagoLancamentoGlobal(p), saldoAbertoLancamentoGlobal(p), p.forma_pagamento, p.tipo_divida, p.numero_nfe, p.data_vencimento, p.data_pagamento, p.observacao]);
     });
     const csv = rows.map(r => r.join(";")).join("\n");
     const blob = new Blob([csv], { type: "text/csv;charset=utf-8;" });
@@ -1933,6 +1993,13 @@ const ReportsScreen = ({ data }) => {
             </select>
           </div>
           <div style={S.formRow}>
+            <label style={S.label}>Comprador</label>
+            <select style={S.select} value={filterComp} onChange={e => setFilterComp(e.target.value)}>
+              <option value="">Todos</option>
+              {(data.compradores || []).map(c => <option key={c.id} value={c.id}>{c.nome}</option>)}
+            </select>
+          </div>
+          <div style={S.formRow}>
             <label style={S.label}>Forma de Pagamento</label>
             <select style={S.select} value={filterForma} onChange={e => setFilterForma(e.target.value)}>
               <option value="">Todas</option>
@@ -1948,8 +2015,8 @@ const ReportsScreen = ({ data }) => {
             <input style={S.input} type="date" value={dateTo} onChange={e => setDateTo(e.target.value)} />
           </div>
         </div>
-        <div style={{ display: "flex", gap: 10, alignItems: "center" }}>
-          <span style={{ fontSize: 13, color: COLORS.textMuted }}>{filtered.length} registros — Total: <strong style={{ color: COLORS.success }}>{fmt(totalFiltrado)}</strong></span>
+        <div style={{ display: "flex", gap: 10, alignItems: "center", flexWrap: "wrap" }}>
+          <span style={{ fontSize: 13, color: COLORS.textMuted }}>{filtered.length} registros — Devido: <strong style={{ color: COLORS.danger }}>{fmt(totalDevidoFiltrado)}</strong> | Pago: <strong style={{ color: COLORS.success }}>{fmt(totalPagoFiltrado)}</strong> | Saldo aberto: <strong style={{ color: saldoAbertoFiltrado > 0 ? COLORS.danger : COLORS.success }}>{fmt(saldoAbertoFiltrado)}</strong></span>
           <div style={{ flex: 1 }} />
           <button style={S.btn("success")} onClick={exportCSV}><Icon name="download" size={14} color="#fff" /> Exportar CSV</button>
         </div>
@@ -1957,18 +2024,25 @@ const ReportsScreen = ({ data }) => {
       <div style={S.card}>
         <table style={S.table}>
           <thead>
-            <tr>{["Data", "Fornecedor", "Valor", "Forma", "NF-e", "Observação"].map(h => <th key={h} style={S.th}>{h}</th>)}</tr>
+            <tr>{["Data", "Fornecedor", "Comprador", "Valor Devido", "Valor Pago", "Saldo Aberto", "Forma", "NF-e", "Observação"].map(h => <th key={h} style={S.th}>{h}</th>)}</tr>
           </thead>
           <tbody>
-            {filtered.length === 0 && <tr><td colSpan={6} style={{ ...S.td, textAlign: "center", color: COLORS.textMuted, padding: 32 }}>Nenhum registro encontrado com os filtros aplicados</td></tr>}
+            {filtered.length === 0 && <tr><td colSpan={9} style={{ ...S.td, textAlign: "center", color: COLORS.textMuted, padding: 32 }}>Nenhum registro encontrado com os filtros aplicados</td></tr>}
             {filtered.map(p => {
-              const forn = data.fornecedores.find(f => f.id === p.fornecedor_id);
+              const forn = data.fornecedores.find(f => Number(f.id) === Number(p.fornecedor_id));
+              const comp = (data.compradores || []).find(c => Number(c.id) === Number(p.comprador_id));
+              const devido = valorDevidoLancamentoGlobal(p);
+              const pago = valorPagoLancamentoGlobal(p);
+              const saldo = saldoAbertoLancamentoGlobal(p);
               return (
                 <tr key={p.id}>
-                  <td style={S.td}>{fmtDate(p.data_pagamento)}</td>
+                  <td style={S.td}>{fmtDate(p.data_pagamento || p.data_vencimento)}</td>
                   <td style={S.td}>{forn?.nome_fantasia || forn?.razao_social}</td>
-                  <td style={{ ...S.td, fontWeight: 700, color: p.forma_pagamento === "Bonificação" ? COLORS.warning : COLORS.success }}>{fmt(p.valor)}</td>
-                  <td style={S.td}><StatusBadge status={p.forma_pagamento === "Bonificação" ? "Bonificado" : "Pago"} /></td>
+                  <td style={S.td}>{comp?.nome || "-"}</td>
+                  <td style={{ ...S.td, fontWeight: 700, color: COLORS.danger }}>{fmt(devido)}</td>
+                  <td style={{ ...S.td, fontWeight: 700, color: COLORS.success }}>{fmt(pago)}</td>
+                  <td style={{ ...S.td, fontWeight: 700, color: saldo > 0 ? COLORS.danger : COLORS.success }}>{fmt(saldo)}</td>
+                  <td style={S.td}><StatusBadge status={p.forma_pagamento || p.tipo_divida || "Pendente"} /></td>
                   <td style={{ ...S.td, fontFamily: "monospace", fontSize: 12 }}>{p.numero_nfe || "-"}</td>
                   <td style={S.td}>{p.observacao || "-"}</td>
                 </tr>
@@ -2187,7 +2261,7 @@ const SupplierPortal = ({ data, setData, currentUser, onLogout }) => {
   };
 
   if (!forn) return (
-    <div style={{ ...S.loginBox, textAlign: "center" }}>
+    <div style={{ ...S.loginBox, textAlign: "center" }} data-gig-login-box>
       <div style={{ color: "#fff" }}>
         <Icon name="info" size={48} color="#fff" />
         <h2>Cadastro em análise</h2>
@@ -2216,8 +2290,8 @@ const SupplierPortal = ({ data, setData, currentUser, onLogout }) => {
   const filteredPag = pagamentos.filter(p => !filterForma || p.forma_pagamento === filterForma || p.tipo_divida === filterForma);
 
   return (
-    <div style={{ ...S.app, background: "#f8fafc" }}>
-      <div style={{ ...S.sidebar, background: COLORS.sidebar }}>
+    <div style={{ ...S.app, background: "#f8fafc" }} data-gig-app>
+      <div style={{ ...S.sidebar, background: COLORS.sidebar }} data-gig-sidebar>
         <div style={S.sidebarLogo}>
           <img src="/logo-gigantao.png" alt="Gigantão" style={{ maxWidth: 150, background: "#fff", borderRadius: 10, padding: 8 }} />
           <p style={{ ...S.sidebarLogoSub, color: "#B7E7CB" }}>{forn.nome_fantasia || forn.razao_social}</p>
@@ -2243,15 +2317,15 @@ const SupplierPortal = ({ data, setData, currentUser, onLogout }) => {
           <button style={{ ...S.btn("ghost"), padding: 6, color: COLORS.sidebarText }} onClick={onLogout} title="Sair"><Icon name="logout" size={15} /></button>
         </div>
       </div>
-      <div style={S.main}>
-        <div style={{ ...S.topbar, background: "#fff", borderColor: "#e2e8f0" }}>
+      <div style={S.main} data-gig-main>
+        <div style={{ ...S.topbar, background: "#fff", borderColor: "#e2e8f0" }} data-gig-topbar>
           <div>
             <p style={{ margin: 0, fontWeight: 600, fontSize: 14 }}>{forn.razao_social}</p>
             <p style={{ margin: 0, fontSize: 12, color: COLORS.textMuted }}>CNPJ: {forn.cnpj}</p>
           </div>
           <button style={S.btn("outline")} onClick={onLogout}><Icon name="logout" size={14} /> Sair</button>
         </div>
-        <div style={S.content}>
+        <div style={S.content} data-gig-content>
           {tab === "dashboard" && (
             <div>
               <h1 style={S.pageTitle}>Meu Painel</h1>
@@ -2546,11 +2620,12 @@ export default function App() {
   };
 
   // Portal de fornecedor
-  if (screen === "portal-login") return <><LoginScreen onLogin={handleLogin} portalMode data={data} setData={setData} onBackHome={() => setScreen("login")} /><CloudStatus /></>;
-  if (screen === "portal" && currentUser?.tipo === "Fornecedor") return <><SupplierPortal data={data} setData={setData} currentUser={currentUser} onLogout={handleLogout} /><CloudStatus /></>;
+  if (screen === "portal-login") return <><ResponsiveStyles /><LoginScreen onLogin={handleLogin} portalMode data={data} setData={setData} onBackHome={() => setScreen("login")} /><CloudStatus /></>;
+  if (screen === "portal" && currentUser?.tipo === "Fornecedor") return <><ResponsiveStyles /><SupplierPortal data={data} setData={setData} currentUser={currentUser} onLogout={handleLogout} /><CloudStatus /></>;
   if (screen === "login") {
     return (
       <div>
+        <ResponsiveStyles />
         <LoginScreen onLogin={handleLogin} data={data} setData={setData} />
         <CloudStatus />
         <div style={{ position: "fixed", bottom: 24, right: 24 }}>
@@ -2581,9 +2656,11 @@ export default function App() {
   };
 
   return (
-    <div style={S.app}>
+    <>
+    <ResponsiveStyles />
+    <div style={S.app} data-gig-app>
       {/* Sidebar */}
-      <div style={S.sidebar}>
+      <div style={S.sidebar} data-gig-sidebar>
         <div style={S.sidebarLogo}>
           <img src="/logo-gigantao.png" alt="Gigantão" style={{ maxWidth: 150, background: "#fff", borderRadius: 10, padding: 8 }} />
           <p style={S.sidebarLogoSub}>Gestão de Fornecedores</p>
@@ -2608,8 +2685,8 @@ export default function App() {
       </div>
 
       {/* Main */}
-      <div style={S.main}>
-        <div style={S.topbar}>
+      <div style={S.main} data-gig-main>
+        <div style={S.topbar} data-gig-topbar>
           <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
             <div style={{ width: 6, height: 6, borderRadius: "50%", background: COLORS.success }} />
             <span style={{ fontSize: 12, color: COLORS.textMuted }}>Sistema Online</span>
@@ -2623,7 +2700,7 @@ export default function App() {
             </button>
           </div>
         </div>
-        <div style={S.content}>
+        <div style={S.content} data-gig-content>
           {renderPage()}
         </div>
       </div>
@@ -2637,5 +2714,6 @@ export default function App() {
         </div>
       )}
     </div>
+    </>
   );
 }
