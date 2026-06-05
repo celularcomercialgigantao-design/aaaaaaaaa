@@ -27,7 +27,7 @@ const COLORS = {
   borderDark: "#B9D8C7",
 };
 
-const PAYMENT_METHODS = ["PIX","Bonificação","Depósito","TED","DOC","Transferência Bancária","Dinheiro"];
+const PAYMENT_METHODS = ["PIX","Boleto","Bonificação","Depósito","TED","DOC","Transferência Bancária","Dinheiro"];
 const DEBT_PAYMENT_TYPES = ["À Vista", "Parcelado"];
 const STATUS_OPTIONS = ["Pendente","Pago","Parcial","Bonificado"];
 const USER_TYPES = ["Administrador","Operador","Fornecedor"];
@@ -155,6 +155,9 @@ const initData = () => {
       { id: 2, pagamento_id: 3, nome_arquivo: "NF-003.pdf", tipo_arquivo: "PDF", created_at: "2024-02-20" },
       { id: 3, pagamento_id: 4, nome_arquivo: "Contrato-TechSol.pdf", tipo_arquivo: "PDF", created_at: "2024-03-05" },
     ],
+    contratos: [
+      { id: 1, numero_contrato: "CTR-001", fornecedor_id: 1, comprador_id: 1, descricao: "Contrato comercial ABC", valor_contrato: 12000, valor_arrecadado: 3000, forma_pagamento: "Boleto", parcelas: 3, data_inicio: "2024-04-01", data_fim: "2024-06-30", observacao: "Contrato inicial de fornecimento", historico_recebimentos: [{ valor: 3000, data: "2024-04-10", forma_pagamento: "Boleto", observacao: "Primeira parcela" }], created_at: "2024-04-01" },
+    ],
     logs: [
       { id: 1, usuario_id: 1, acao: "Login", descricao: "Login realizado com sucesso", ip: "192.168.1.1", created_at: "2024-04-20T08:00:00" },
       { id: 2, usuario_id: 1, acao: "Cadastro", descricao: "Fornecedor ABC Distribuidora cadastrado", ip: "192.168.1.1", created_at: "2024-04-20T08:30:00" },
@@ -164,7 +167,7 @@ const initData = () => {
       { id: 1, nome: "Lucas Magalhães", email: "lucas@gigantao.com", cargo: "Comprador", centro_custo: "Comercial", ativo: true, status_cadastro: "Ativo", created_at: "2024-01-01" },
       { id: 2, nome: "João Comprador", email: "joao@gigantao.com", cargo: "Comprador", centro_custo: "Comercial", ativo: true, status_cadastro: "Ativo", created_at: "2024-01-02" },
     ],
-    nextId: { users: 4, fornecedores: 4, pagamentos: 9, anexos: 4, logs: 4, compradores: 3 },
+    nextId: { users: 4, fornecedores: 4, pagamentos: 9, anexos: 4, logs: 4, compradores: 3, contratos: 2 },
   });
 };
 
@@ -175,6 +178,7 @@ function normalizeData(raw) {
   data.pagamentos = Array.isArray(data.pagamentos) ? data.pagamentos : [];
   data.anexos = Array.isArray(data.anexos) ? data.anexos : [];
   data.logs = Array.isArray(data.logs) ? data.logs : [];
+  data.contratos = Array.isArray(data.contratos) ? data.contratos : [];
   data.compradores = Array.isArray(data.compradores) ? data.compradores : [
     { id: 1, nome: "Lucas Magalhães", email: "lucas@gigantao.com", cargo: "Comprador", centro_custo: "Comercial", ativo: true, status_cadastro: "Ativo", created_at: "2024-01-01" },
     { id: 2, nome: "João Comprador", email: "joao@gigantao.com", cargo: "Comprador", centro_custo: "Comercial", ativo: true, status_cadastro: "Ativo", created_at: "2024-01-02" },
@@ -186,9 +190,21 @@ function normalizeData(raw) {
   data.nextId.anexos = data.nextId.anexos || (Math.max(0, ...data.anexos.map(x => Number(x.id) || 0)) + 1);
   data.nextId.logs = data.nextId.logs || (Math.max(0, ...data.logs.map(x => Number(x.id) || 0)) + 1);
   data.nextId.compradores = data.nextId.compradores || (Math.max(0, ...data.compradores.map(x => Number(x.id) || 0)) + 1);
+  data.nextId.contratos = data.nextId.contratos || (Math.max(0, ...data.contratos.map(x => Number(x.id) || 0)) + 1);
   data.users = data.users.map(u => ({ ...u, ativo: u.ativo === true, status_cadastro: u.status_cadastro || (u.ativo ? "Ativo" : "Em análise") }));
   data.compradores = data.compradores.map(c => ({ ...c, ativo: c.ativo !== false, status_cadastro: c.status_cadastro || (c.ativo === false ? "Em análise" : "Ativo") }));
   data.fornecedores = data.fornecedores.map(f => ({ ...f, ativo: f.ativo !== false, status_cadastro: f.status_cadastro || "Ativo" }));
+  data.contratos = data.contratos.map(c => ({
+    ...c,
+    fornecedor_id: c.fornecedor_id ? Number(c.fornecedor_id) : null,
+    comprador_id: c.comprador_id ? Number(c.comprador_id) : null,
+    valor_contrato: Number(c.valor_contrato || 0),
+    valor_arrecadado: Number(c.valor_arrecadado || 0),
+    forma_pagamento: c.forma_pagamento || "Boleto",
+    parcelas: Number(c.parcelas || 1),
+    historico_recebimentos: Array.isArray(c.historico_recebimentos) ? c.historico_recebimentos : [],
+    observacao: c.observacao || ""
+  }));
   data.pagamentos = data.pagamentos.map(p => ({
     ...p,
     fornecedor_id: p.fornecedor_id ? Number(p.fornecedor_id) : null,
@@ -673,8 +689,8 @@ const Dashboard = ({ data, currentUser }) => {
 
   return (
     <div>
-      <h1 style={S.pageTitle}>Dashboard</h1>
-      <p style={S.pageSub}>Visão geral por período, comprador, fornecedor e pagamentos confirmados</p>
+      <h1 style={S.pageTitle}>Dashboard de Despesas</h1>
+      <p style={S.pageSub}>Visão geral de despesas por período, comprador, fornecedor e pagamentos confirmados</p>
 
       <div style={{ ...S.card, marginBottom: 16 }}>
         <div style={{ display: "flex", gap: 10, alignItems: "end", flexWrap: "wrap" }}>
@@ -1450,6 +1466,225 @@ const PaymentsScreen = ({ data, setData, currentUser, addLog }) => {
   );
 };
 
+
+// ─── CONTRACTS DASHBOARD SCREEN ──────────────────────────────────────────────
+const ContractsScreen = ({ data, setData, currentUser, addLog }) => {
+  const [search, setSearch] = useState("");
+  const [filterComp, setFilterComp] = useState("");
+  const [filterForn, setFilterForn] = useState("");
+  const [inicio, setInicio] = useState("");
+  const [fim, setFim] = useState("");
+  const [modal, setModal] = useState(false);
+  const [receiveModal, setReceiveModal] = useState(null);
+  const [form, setForm] = useState({ forma_pagamento: "Boleto", parcelas: 1, data_inicio: new Date().toISOString().slice(0, 10) });
+  const [receiveForm, setReceiveForm] = useState({ valor: "", data: new Date().toISOString().slice(0, 10), forma_pagamento: "Boleto", observacao: "" });
+  const [confirm, setConfirm] = useState(null);
+  const [sort, setSort] = useState({ key: "data_inicio", dir: -1 });
+  const canDelete = currentUser.tipo === "Administrador";
+
+  const fornecedorNome = (id) => {
+    const f = data.fornecedores.find(x => Number(x.id) === Number(id));
+    return f?.nome_fantasia || f?.razao_social || "-";
+  };
+  const compradorNome = (id) => data.compradores?.find(c => Number(c.id) === Number(id))?.nome || "Sem comprador";
+  const saldoContrato = (c) => Number(c.valor_contrato || 0) - Number(c.valor_arrecadado || 0);
+  const statusContrato = (c) => {
+    const saldo = saldoContrato(c);
+    const arrec = Number(c.valor_arrecadado || 0);
+    if (arrec <= 0) return "Pendente";
+    if (saldo <= 0) return "Pago";
+    return "Parcial";
+  };
+  const ordenar = (key) => setSort(prev => ({ key, dir: prev.key === key ? prev.dir * -1 : 1 }));
+
+  const filtered = (data.contratos || []).filter(c => {
+    const d = c.data_inicio || c.created_at?.slice?.(0,10) || "";
+    const txt = [c.numero_contrato, c.descricao, c.observacao, fornecedorNome(c.fornecedor_id), compradorNome(c.comprador_id), c.forma_pagamento].join(" ").toLowerCase();
+    return (!search || txt.includes(search.toLowerCase())) &&
+      (!filterComp || Number(c.comprador_id) === Number(filterComp)) &&
+      (!filterForn || Number(c.fornecedor_id) === Number(filterForn)) &&
+      (!inicio || d >= inicio) && (!fim || d <= fim);
+  }).sort((a,b) => {
+    const key = sort.key;
+    let av = key === "fornecedor" ? fornecedorNome(a.fornecedor_id) : key === "comprador" ? compradorNome(a.comprador_id) : key === "saldo" ? saldoContrato(a) : a[key];
+    let bv = key === "fornecedor" ? fornecedorNome(b.fornecedor_id) : key === "comprador" ? compradorNome(b.comprador_id) : key === "saldo" ? saldoContrato(b) : b[key];
+    if (["valor_contrato", "valor_arrecadado", "saldo", "parcelas"].includes(key)) return (Number(av || 0) - Number(bv || 0)) * sort.dir;
+    return String(av || "").localeCompare(String(bv || "")) * sort.dir;
+  });
+
+  const totais = filtered.reduce((acc, c) => {
+    acc.contratos += Number(c.valor_contrato || 0);
+    acc.arrecadado += Number(c.valor_arrecadado || 0);
+    return acc;
+  }, { contratos: 0, arrecadado: 0 });
+
+  const porComprador = (data.compradores || []).map(comp => {
+    const itens = filtered.filter(c => Number(c.comprador_id) === Number(comp.id));
+    const contratos = itens.reduce((s,c) => s + Number(c.valor_contrato || 0), 0);
+    const arrecadado = itens.reduce((s,c) => s + Number(c.valor_arrecadado || 0), 0);
+    return { ...comp, contratos, arrecadado, saldo: contratos - arrecadado, qtd: itens.length };
+  }).filter(c => c.qtd > 0);
+
+  const saveContract = () => {
+    if (!form.numero_contrato && !form.descricao) return alert("Informe o número ou descrição do contrato.");
+    if (!form.fornecedor_id || !form.comprador_id) return alert("Fornecedor e comprador são obrigatórios.");
+    if (!form.valor_contrato || Number(form.valor_contrato) <= 0) return alert("Informe o valor do contrato.");
+    if (!form.forma_pagamento) return alert("Informe a forma de pagamento.");
+    if (!form.parcelas || Number(form.parcelas) < 1) return alert("Informe em quantas vezes será pago.");
+    if (!String(form.observacao || "").trim()) return alert("A observação do contrato é obrigatória.");
+    const next = { ...data, contratos: [...(data.contratos || [])] };
+    const id = next.nextId.contratos++;
+    next.contratos.push({
+      ...form,
+      id,
+      fornecedor_id: Number(form.fornecedor_id),
+      comprador_id: Number(form.comprador_id),
+      valor_contrato: Number(form.valor_contrato || 0),
+      valor_arrecadado: 0,
+      parcelas: Number(form.parcelas || 1),
+      historico_recebimentos: [],
+      created_at: new Date().toISOString()
+    });
+    addLog(`Contrato ${form.numero_contrato || form.descricao} registrado`);
+    setData(next);
+    setModal(false);
+    setForm({ forma_pagamento: "Boleto", parcelas: 1, data_inicio: new Date().toISOString().slice(0, 10) });
+  };
+
+  const saveReceive = () => {
+    if (!receiveModal) return;
+    if (!receiveForm.valor || Number(receiveForm.valor) <= 0) return alert("Informe o valor arrecadado.");
+    const next = { ...data, contratos: [...(data.contratos || [])] };
+    next.contratos = next.contratos.map(c => {
+      if (Number(c.id) !== Number(receiveModal.id)) return c;
+      const valor = Number(receiveForm.valor || 0);
+      return {
+        ...c,
+        valor_arrecadado: Number(c.valor_arrecadado || 0) + valor,
+        historico_recebimentos: [...(c.historico_recebimentos || []), { valor, data: receiveForm.data || new Date().toISOString().slice(0,10), forma_pagamento: receiveForm.forma_pagamento || "Boleto", observacao: receiveForm.observacao || "" }]
+      };
+    });
+    addLog(`Arrecadação de contrato #${receiveModal.id}: ${fmt(Number(receiveForm.valor))}`);
+    setData(next);
+    setReceiveModal(null);
+    setReceiveForm({ valor: "", data: new Date().toISOString().slice(0, 10), forma_pagamento: "Boleto", observacao: "" });
+  };
+
+  const doDelete = (id) => {
+    const next = { ...data, contratos: (data.contratos || []).filter(c => Number(c.id) !== Number(id)) };
+    addLog(`Contrato #${id} excluído`);
+    setData(next);
+    setConfirm(null);
+  };
+
+  return (
+    <div>
+      <h1 style={S.pageTitle}>Dashboard de Contratos</h1>
+      <p style={S.pageSub}>Controle separado de contratos, valores arrecadados, observações e compradores responsáveis.</p>
+
+      <div style={S.grid(3)}>
+        <MetricCard label="Valor Total de Contratos" value={fmt(totais.contratos)} color={COLORS.primary} />
+        <MetricCard label="Valores Arrecadados de Contrato" value={fmt(totais.arrecadado)} color={COLORS.success} />
+        <MetricCard label="Saldo a Arrecadar" value={fmt(totais.contratos - totais.arrecadado)} color={totais.contratos - totais.arrecadado <= 0 ? COLORS.success : COLORS.warning} />
+      </div>
+
+      <div style={{ ...S.searchBar, marginTop: 16 }}>
+        <input style={{ ...S.input, flex: 1 }} placeholder="Buscar contrato, fornecedor, comprador ou observação..." value={search} onChange={e => setSearch(e.target.value)} />
+        <select style={{ ...S.select, width: 190 }} value={filterComp} onChange={e => setFilterComp(e.target.value)}>
+          <option value="">Todos compradores</option>
+          {(data.compradores || []).map(c => <option key={c.id} value={c.id}>{c.nome}</option>)}
+        </select>
+        <select style={{ ...S.select, width: 190 }} value={filterForn} onChange={e => setFilterForn(e.target.value)}>
+          <option value="">Todos fornecedores</option>
+          {(data.fornecedores || []).map(f => <option key={f.id} value={f.id}>{f.nome_fantasia || f.razao_social}</option>)}
+        </select>
+        <input style={{ ...S.input, width: 150 }} type="date" value={inicio} onChange={e => setInicio(e.target.value)} />
+        <input style={{ ...S.input, width: 150 }} type="date" value={fim} onChange={e => setFim(e.target.value)} />
+        <button style={S.btn("primary")} onClick={() => setModal(true)}>+ Registrar Novo Contrato</button>
+      </div>
+
+      <div style={{ ...S.card, marginTop: 16 }}>
+        <p style={{ ...S.cardTitle, fontSize: 14, fontWeight: 700, marginBottom: 12 }}>Resumo por comprador</p>
+        <table style={S.table}>
+          <thead><tr>{["Comprador", "Qtd", "Contratos", "Arrecadado", "Saldo"].map(h => <th key={h} style={S.th}>{h}</th>)}</tr></thead>
+          <tbody>
+            {porComprador.length === 0 && <tr><td colSpan={5} style={{ ...S.td, textAlign: "center", color: COLORS.textMuted }}>Sem contratos no filtro</td></tr>}
+            {porComprador.map(c => <tr key={c.id}><td style={S.td}>{c.nome}</td><td style={S.td}>{c.qtd}</td><td style={S.td}>{fmt(c.contratos)}</td><td style={{...S.td, color: COLORS.success, fontWeight: 700}}>{fmt(c.arrecadado)}</td><td style={S.td}>{fmt(c.saldo)}</td></tr>)}
+          </tbody>
+        </table>
+      </div>
+
+      <div style={{ ...S.card, marginTop: 16, overflowX: "auto" }}>
+        <table style={S.table}>
+          <thead>
+            <tr>
+              {[["id", "#"], ["numero_contrato", "Contrato"], ["fornecedor", "Fornecedor"], ["comprador", "Comprador"], ["valor_contrato", "Valor Contrato"], ["valor_arrecadado", "Arrecadado"], ["saldo", "Saldo"], ["forma_pagamento", "Forma"], ["parcelas", "Parcelas"], ["data_inicio", "Data"], ["observacao", "Observação"]].map(([key,label]) => <th key={key} style={{ ...S.th, cursor: "pointer" }} onClick={() => ordenar(key)}>{label} {sort.key === key ? (sort.dir === 1 ? "▲" : "▼") : ""}</th>)}
+              <th style={S.th}>Ações</th>
+            </tr>
+          </thead>
+          <tbody>
+            {filtered.length === 0 && <tr><td colSpan={12} style={{ ...S.td, textAlign: "center", color: COLORS.textMuted, padding: 32 }}>Nenhum contrato encontrado</td></tr>}
+            {filtered.map(c => {
+              const saldo = saldoContrato(c);
+              return <tr key={c.id}>
+                <td style={{ ...S.td, color: COLORS.textMuted }}>#{c.id}</td>
+                <td style={S.td}>{c.numero_contrato || c.descricao || "Contrato"}<br/><span style={{ fontSize: 11, color: COLORS.textMuted }}>{statusContrato(c)}</span></td>
+                <td style={S.td}>{fornecedorNome(c.fornecedor_id)}</td>
+                <td style={S.td}>{compradorNome(c.comprador_id)}</td>
+                <td style={{ ...S.td, fontWeight: 700 }}>{fmt(c.valor_contrato)}</td>
+                <td style={{ ...S.td, color: COLORS.success, fontWeight: 700 }}>{fmt(c.valor_arrecadado)}</td>
+                <td style={{ ...S.td, color: saldo <= 0 ? COLORS.success : COLORS.warning, fontWeight: 700 }}>{fmt(saldo)}</td>
+                <td style={S.td}>{c.forma_pagamento || "-"}</td>
+                <td style={S.td}>{c.parcelas || 1}x</td>
+                <td style={S.td}>{fmtDate(c.data_inicio || c.created_at)}</td>
+                <td style={{ ...S.td, minWidth: 220 }}>{c.observacao || "-"}</td>
+                <td style={S.td}><div style={{ display: "flex", gap: 6, flexWrap: "wrap" }}>
+                  {saldo > 0 && <button style={{ ...S.btn("success", "sm"), padding: "4px 7px" }} onClick={() => setReceiveModal(c)}>Receber</button>}
+                  {canDelete && <button style={{ ...S.btn("danger", "sm"), padding: "4px 7px" }} onClick={() => setConfirm(c.id)}><Icon name="trash" size={12} color="#fff" /></button>}
+                </div></td>
+              </tr>;
+            })}
+          </tbody>
+        </table>
+      </div>
+
+      {modal && <Modal title="Registrar Novo Contrato" onClose={() => setModal(false)} wide>
+        <div style={S.grid(2)}>
+          <div style={S.formRow}><label style={S.label}>Número/Identificação do contrato *</label><input style={S.input} value={form.numero_contrato || ""} onChange={e => setForm(p => ({...p, numero_contrato: e.target.value}))} placeholder="Ex: CTR-001" /></div>
+          <div style={S.formRow}><label style={S.label}>Descrição</label><input style={S.input} value={form.descricao || ""} onChange={e => setForm(p => ({...p, descricao: e.target.value}))} placeholder="Contrato de fornecimento" /></div>
+        </div>
+        <div style={S.grid(2)}>
+          <div style={S.formRow}><label style={S.label}>Fornecedor *</label><select style={S.select} value={form.fornecedor_id || ""} onChange={e => setForm(p => ({...p, fornecedor_id: e.target.value}))}><option value="">Selecione...</option>{(data.fornecedores || []).filter(f => f.ativo !== false).map(f => <option key={f.id} value={f.id}>{f.nome_fantasia || f.razao_social}</option>)}</select></div>
+          <div style={S.formRow}><label style={S.label}>Comprador *</label><select style={S.select} value={form.comprador_id || ""} onChange={e => setForm(p => ({...p, comprador_id: e.target.value}))}><option value="">Selecione...</option>{(data.compradores || []).filter(c => c.ativo !== false).map(c => <option key={c.id} value={c.id}>{c.nome}</option>)}</select></div>
+        </div>
+        <div style={S.grid(4)}>
+          <div style={S.formRow}><label style={S.label}>Valor do contrato (R$) *</label><input style={S.input} type="number" value={form.valor_contrato || ""} onChange={e => setForm(p => ({...p, valor_contrato: e.target.value}))} /></div>
+          <div style={S.formRow}><label style={S.label}>Forma de pagamento *</label><select style={S.select} value={form.forma_pagamento || "Boleto"} onChange={e => setForm(p => ({...p, forma_pagamento: e.target.value}))}>{PAYMENT_METHODS.map(m => <option key={m} value={m}>{m}</option>)}</select></div>
+          <div style={S.formRow}><label style={S.label}>Em quantas vezes *</label><input style={S.input} type="number" min="1" value={form.parcelas || 1} onChange={e => setForm(p => ({...p, parcelas: e.target.value}))} /></div>
+          <div style={S.formRow}><label style={S.label}>Data do contrato</label><input style={S.input} type="date" value={form.data_inicio || ""} onChange={e => setForm(p => ({...p, data_inicio: e.target.value}))} /></div>
+        </div>
+        <div style={S.formRow}><label style={S.label}>Observação *</label><textarea style={{ ...S.input, minHeight: 80, resize: "vertical" }} value={form.observacao || ""} onChange={e => setForm(p => ({...p, observacao: e.target.value}))} placeholder="Obrigatório: detalhe regras, negociação, vencimentos ou observações do contrato." /></div>
+        <div style={{ display: "flex", gap: 10, justifyContent: "flex-end" }}><button style={S.btn("outline")} onClick={() => setModal(false)}>Cancelar</button><button style={S.btn("primary")} onClick={saveContract}>Salvar contrato</button></div>
+      </Modal>}
+
+      {receiveModal && <Modal title={`Registrar valor arrecadado do contrato #${receiveModal.id}`} onClose={() => setReceiveModal(null)}>
+        <div style={{ background: COLORS.primaryLight, padding: 12, borderRadius: 8, marginBottom: 14 }}>
+          <p style={{ margin: 0, fontWeight: 700 }}>{receiveModal.numero_contrato || receiveModal.descricao}</p>
+          <p style={{ margin: "4px 0 0", fontSize: 12, color: COLORS.textMuted }}>Contrato: {fmt(receiveModal.valor_contrato)} | Arrecadado: {fmt(receiveModal.valor_arrecadado)} | Saldo: {fmt(saldoContrato(receiveModal))}</p>
+        </div>
+        <div style={S.grid(2)}>
+          <div style={S.formRow}><label style={S.label}>Valor arrecadado (R$) *</label><input style={S.input} type="number" value={receiveForm.valor || ""} onChange={e => setReceiveForm(p => ({...p, valor: e.target.value}))} /></div>
+          <div style={S.formRow}><label style={S.label}>Data</label><input style={S.input} type="date" value={receiveForm.data || ""} onChange={e => setReceiveForm(p => ({...p, data: e.target.value}))} /></div>
+        </div>
+        <div style={S.formRow}><label style={S.label}>Forma</label><select style={S.select} value={receiveForm.forma_pagamento || "Boleto"} onChange={e => setReceiveForm(p => ({...p, forma_pagamento: e.target.value}))}>{PAYMENT_METHODS.map(m => <option key={m} value={m}>{m}</option>)}</select></div>
+        <div style={S.formRow}><label style={S.label}>Observação</label><textarea style={{ ...S.input, minHeight: 60, resize: "vertical" }} value={receiveForm.observacao || ""} onChange={e => setReceiveForm(p => ({...p, observacao: e.target.value}))} /></div>
+        <div style={{ display: "flex", gap: 10, justifyContent: "flex-end" }}><button style={S.btn("outline")} onClick={() => setReceiveModal(null)}>Cancelar</button><button style={S.btn("primary")} onClick={saveReceive}>Salvar arrecadação</button></div>
+      </Modal>}
+      {confirm && <ConfirmModal message="Excluir este contrato?" onConfirm={() => doDelete(confirm)} onCancel={() => setConfirm(null)} />}
+    </div>
+  );
+};
+
 // ─── FINANCIAL CONTROL SCREEN// ─── FINANCIAL CONTROL SCREEN// ─── FINANCIAL CONTROL SCREEN ─────────────────────────────────────────────────
 const FinancialScreen = ({ data, setData, currentUser, addLog }) => {
   const [modal, setModal] = useState(null);
@@ -1989,7 +2224,7 @@ const SupplierPortal = ({ data, setData, currentUser, onLogout }) => {
         </div>
         <nav style={S.sidebarNav}>
           {[
-            { key: "dashboard", label: "Dashboard", icon: "dashboard" },
+            { key: "dashboard", label: "Dashboard de Despesas", icon: "dashboard" },
             { key: "payments", label: "Histórico de Pagamentos", icon: "payments" },
             { key: "docs", label: "Documentos", icon: "docs" },
             { key: "reports", label: "Relatórios", icon: "reports" },
@@ -2199,11 +2434,12 @@ const SupplierPortal = ({ data, setData, currentUser, onLogout }) => {
 // ─── SIDEBAR NAV CONFIG ───────────────────────────────────────────────────────
 const adminNav = [
   { section: "Principal" },
-  { key: "dashboard", label: "Dashboard", icon: "dashboard" },
+  { key: "dashboard", label: "Dashboard de Despesas", icon: "dashboard" },
   { section: "Cadastros" },
   { key: "suppliers", label: "Fornecedores", icon: "suppliers" },
   { key: "buyers", label: "Compradores", icon: "users" },
   { key: "payments", label: "Pagamentos", icon: "payments" },
+  { key: "contracts", label: "Contratos", icon: "docs" },
   { section: "Documentos & Relatórios" },
   { key: "documents", label: "Documentos", icon: "docs" },
   { key: "reports", label: "Relatórios", icon: "reports" },
@@ -2214,11 +2450,12 @@ const adminNav = [
 
 const operatorNav = [
   { section: "Principal" },
-  { key: "dashboard", label: "Dashboard", icon: "dashboard" },
+  { key: "dashboard", label: "Dashboard de Despesas", icon: "dashboard" },
   { section: "Consultas" },
   { key: "suppliers", label: "Fornecedores", icon: "suppliers" },
   { key: "buyers", label: "Compradores", icon: "users" },
   { key: "payments", label: "Pagamentos", icon: "payments" },
+  { key: "contracts", label: "Contratos", icon: "docs" },
   { key: "documents", label: "Documentos", icon: "docs" },
   { key: "reports", label: "Relatórios", icon: "reports" },
 ];
@@ -2334,6 +2571,7 @@ export default function App() {
       case "suppliers": return <SuppliersScreen {...props} />;
       case "buyers": return <BuyersScreen {...props} />;
       case "payments": return <PaymentsScreen {...props} />;
+      case "contracts": return <ContractsScreen {...props} />;
       case "documents": return <DocumentsScreen {...props} />;
       case "reports": return <ReportsScreen {...props} />;
       case "users": return <UsersScreen {...props} />;
